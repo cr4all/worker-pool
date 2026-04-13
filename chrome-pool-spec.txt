@@ -1,0 +1,18 @@
+Chrome browser pool management system
+
+Purpose: Manage Chrome browser instances for bots.
+The system can create, delete, and list Chrome browsers.
+
+1. Chrome browsers are created using the Docker image suyash5053/chromium-vnc-cdp.
+2. The image uses internal ports 5900 (VNC) and 9222 (CDP).
+   Each running browser has a container name, external port 1, and external port 2.
+   Port 1 is the host VNC port; port 2 is the host CDP port.
+
+3. On /start, run one container, for example:
+   docker run -d --name [container_name] -p [host_port_1]:5900 -p [host_port_2]:9222 -e VNC_PASS=mystakechrome suyash5053/chromium-vnc-cdp
+   If Docker starts successfully, return the container name and both host ports.
+   On failure, return an error message.
+
+4. On /stop, remove the Docker container for the given container name.
+
+5. On /list, return the list of Chrome browsers currently running (pool-managed).
