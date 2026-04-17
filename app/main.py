@@ -76,8 +76,8 @@ class StopResponse(BaseModel):
 
 class InstanceOut(BaseModel):
     name: str
-    vnc_port: int
-    cdp_port: int
+    vnc_port: Optional[int]
+    cdp_port: Optional[int]
 
 
 class ListResponse(BaseModel):
@@ -149,8 +149,10 @@ async def start_pool(
             raise HTTPException(status_code=500, detail=str(e)) from e
         used: set[int] = set()
         for inst in instances:
-            used.add(inst.vnc_port)
-            used.add(inst.cdp_port)
+            if inst.vnc_port is not None:
+                used.add(inst.vnc_port)
+            if inst.cdp_port is not None:
+                used.add(inst.cdp_port)
         try:
             vnc_p, cdp_p = allocate_sequential_pool_ports(used)
         except RuntimeError as e:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -97,8 +98,8 @@ def list_pool_container_names() -> list[str]:
 @dataclass
 class PoolInstance:
     name: str
-    vnc_port: int
-    cdp_port: int
+    vnc_port: int | None
+    cdp_port: int | None
 
 
 def _host_port(binding: list[dict[str, str]] | None) -> int | None:
@@ -113,7 +114,41 @@ def _host_port(binding: list[dict[str, str]] | None) -> int | None:
         return None
 
 
+def _is_managed_pool_container(inspected: dict[str, Any]) -> bool:
+    labels = (inspected.get("Config") or {}).get("Labels") or {}
+    return labels.get("chrome-pool.managed") == "1"
+
+
+def _container_display_name(inspected: dict[str, Any]) -> str | None:
+    # docker inspect returns Name like "/container-name"
+    n = inspected.get("Name")
+    if isinstance(n, str) and n.startswith("/"):
+        return n[1:]
+    if isinstance(n, str) and n:
+        return n
+    return None
+
+
+def _extract_ports(inspected: dict[str, Any]) -> tuple[int | None, int | None]:
+    # Prefer HostConfig.PortBindings, but fall back to NetworkSettings.Ports.
+    bindings = (inspected.get("HostConfig") or {}).get("PortBindings") or {}
+    vnc = _host_port(bindings.get("5900/tcp"))
+    cdp = _host_port(bindings.get("9222/tcp"))
+    if vnc is not None and cdp is not None:
+        return vnc, cdp
+
+    ports = (inspected.get("NetworkSettings") or {}).get("Ports") or {}
+    vnc2 = _host_port(ports.get("5900/tcp"))
+    cdp2 = _host_port(ports.get("9222/tcp"))
+    return (vnc if vnc is not None else vnc2), (cdp if cdp is not None else cdp2)
+
+
 def inspect_instance(name: str) -> PoolInstance | None:
+    """
+    Inspect a single instance.
+
+    Returns PoolInstance even if port bindings are not yet visible (ports may be None).
+    """
     p = _docker(["inspect", name])
     if p.returncode != 0:
         return None
@@ -124,25 +159,68 @@ def inspect_instance(name: str) -> PoolInstance | None:
     if not data:
         return None
     c = data[0]
-    labels = (c.get("Config") or {}).get("Labels") or {}
-    if labels.get("chrome-pool.managed") != "1":
+    if not _is_managed_pool_container(c):
         return None
-    bindings = (c.get("HostConfig") or {}).get("PortBindings") or {}
-    vnc = _host_port(bindings.get("5900/tcp"))
-    cdp = _host_port(bindings.get("9222/tcp"))
-    if vnc is None or cdp is None:
-        return None
-    return PoolInstance(name=name, vnc_port=vnc, cdp_port=cdp)
+    vnc, cdp = _extract_ports(c)
+    display = _container_display_name(c) or name
+    return PoolInstance(name=display, vnc_port=vnc, cdp_port=cdp)
 
 
-def list_pool_instances() -> list[PoolInstance]:
+def _bulk_inspect(names: list[str]) -> list[dict[str, Any]]:
+    if not names:
+        return []
+    p = _docker(["inspect", *names])
+    if p.returncode != 0:
+        msg = (p.stderr or p.stdout or "").strip() or "docker inspect failed"
+        raise DockerError(msg, p.returncode)
+    try:
+        data = json.loads(p.stdout or "[]")
+    except json.JSONDecodeError as e:
+        raise DockerError(f"docker inspect returned invalid JSON: {e}") from e
+    if isinstance(data, list):
+        return [d for d in data if isinstance(d, dict)]
+    return []
+
+
+def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[PoolInstance]:
+    """
+    List running pool containers.
+
+    Under concurrent /start calls, Docker may briefly report a container without port bindings.
+    This function retries a few times so /list returns a complete container list.
+    If ports are still not available after retries, the instance is still returned with ports=None.
+    """
     names = list_pool_container_names()
-    out: list[PoolInstance] = []
-    for n in names:
-        inst = inspect_instance(n)
-        if inst:
-            out.append(inst)
-    return out
+    if not names:
+        return []
+
+    pending: dict[str, PoolInstance] = {}
+    ready: dict[str, PoolInstance] = {}
+
+    for attempt in range(max(1, retries)):
+        inspected = _bulk_inspect(names)
+        for c in inspected:
+            if not _is_managed_pool_container(c):
+                continue
+            display = _container_display_name(c)
+            if not display:
+                continue
+            vnc, cdp = _extract_ports(c)
+            inst = PoolInstance(name=display, vnc_port=vnc, cdp_port=cdp)
+            if vnc is None or cdp is None:
+                pending[display] = inst
+            else:
+                ready[display] = inst
+                pending.pop(display, None)
+
+        if not pending:
+            break
+        if attempt < retries - 1:
+            time.sleep(retry_delay_sec)
+
+    # Preserve a stable order: by name
+    merged = {**pending, **ready}
+    return [merged[k] for k in sorted(merged.keys())]
 
 
 def stop_all_pool_containers() -> tuple[list[str], list[tuple[str, str]]]:
