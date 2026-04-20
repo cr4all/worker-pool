@@ -2,6 +2,8 @@
 
 HTTP API to create, stop, and list Docker-based Chrome instances (VNC + CDP). Default image: `suyash5053/chromium-vnc-cdp`.
 
+API specification (Korean): [docs/API.md](docs/API.md). With the server running, OpenAPI JSON is at `/openapi.json` and Swagger UI at `/docs`.
+
 ## Requirements
 
 - Python 3.11+
@@ -33,6 +35,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 | `CHROME_DOCKER_IMAGE` | Image to run | `suyash5053/chromium-vnc-cdp` |
 | `START_CDP_TIMEOUT_SEC` | Seconds to wait for CDP after start | `60` |
 | `API_KEY` | If set, requires `Authorization: Bearer <key>` | (unset) |
+| `MAX_RUNNING` | Max number of running pool containers. If unset, auto-computed from RAM (`floor(totalGiB * 0.85)`, min 1). | (auto) |
 
 You can also set these in a `.env` file.
 

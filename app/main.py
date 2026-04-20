@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 import uuid
 from typing import Annotated, Optional
 
 import httpx
+import psutil
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +24,7 @@ class Settings(BaseSettings):
     chrome_docker_image: str = "suyash5053/chromium-vnc-cdp"
     start_cdp_timeout_sec: float = 60.0
     api_key: Optional[str] = None
+    max_running: Optional[int] = None
 
 
 settings = Settings()
@@ -48,6 +51,21 @@ app = FastAPI(title="Chrome pool manager", version="1.0.0")
 
 # Serial port allocation + avoid races before docker run
 _start_lock = asyncio.Lock()
+
+
+def effective_max_running(s: Settings) -> int:
+    """
+    If MAX_RUNNING is set, use it. Otherwise compute:
+      floor(total_ram_bytes * 0.85 / 1GiB), minimum 1.
+    """
+    if s.max_running is not None:
+        if s.max_running < 1:
+            return 1
+        return int(s.max_running)
+    total = int(psutil.virtual_memory().total)
+    gib = 1024**3
+    computed = int(math.floor((total * 0.85) / gib))
+    return max(1, computed)
 
 
 class StartBody(BaseModel):
@@ -143,6 +161,17 @@ async def start_pool(
         raise HTTPException(status_code=409, detail=f"Container already exists: {name}")
 
     async with _start_lock:
+        max_allowed = effective_max_running(s)
+        try:
+            current_names = docker_ops.list_pool_container_names()
+        except DockerError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        current = len(current_names)
+        if current >= max_allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={"error": "limit reached", "current": current, "max": max_allowed},
+            )
         try:
             instances = docker_ops.list_pool_instances()
         except DockerError as e:
