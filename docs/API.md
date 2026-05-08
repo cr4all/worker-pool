@@ -17,6 +17,12 @@ Code reference: `app/main.py` (service `version="1.0.0"`)
 - If `MAX_RUNNING` is not set, the limit is auto-computed from total RAM:
   - `max(1, floor(total_ram_bytes * 0.85 / 1GiB))`
 
+### Proxies (optional)
+
+- Env `PROXIES_CSV` (default `proxies.csv`): CSV with columns `Region`, `Host`, `Port`, `User`, `Pass`.
+- If the file is missing, empty, or has no valid data rows, `POST /start` runs the pool image **without** passing `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, or `PROXY_PASS` to Docker (direct Chrome; the proxy-capable image skips loading the proxy extension when `PROXY_HOST` is unset).
+- If there is at least one valid row, the server picks a row with **minimum** number of currently running pool containers using that row’s index (random tie-break), passes the four `PROXY_*` variables, and sets labels `chrome-pool.proxy-index` and `chrome-pool.proxy-region` (no secrets in labels).
+
 ### Auth (optional)
 
 If `API_KEY` env var is set, all endpoints **except** `GET /health` require:
@@ -55,7 +61,7 @@ Docker client availability check.
 
 ## `POST /start`
 
-Start one Chrome container using Docker image `suyash5053/chromium-vnc-cdp`, label it as pool-managed, and expose:
+Start one Chrome container using the image from `CHROME_DOCKER_IMAGE` (default `proxy-chrome:latest`), label it as pool-managed, and expose:
 
 - container `5900/tcp` → host VNC port
 - container `9222/tcp` → host CDP port
@@ -81,9 +87,13 @@ Optional:
   "name": "chrome-pool-abc123def456",
   "vnc_port": 5901,
   "cdp_port": 9223,
-  "vnc_password": "mystakechrome"
+  "vnc_password": "mystakechrome",
+  "proxy_index": 0,
+  "proxy_region": "UK"
 }
 ```
+
+When no proxy was assigned, `proxy_index` and `proxy_region` are JSON `null`.
 
 ### Status codes
 
@@ -168,10 +178,18 @@ List running pool-managed containers and their host ports.
 ```json
 {
   "instances": [
-    { "name": "chrome-pool-a", "vnc_port": 5901, "cdp_port": 9223 }
+    {
+      "name": "chrome-pool-a",
+      "vnc_port": 5901,
+      "cdp_port": 9223,
+      "proxy_index": 0,
+      "proxy_region": "UK"
+    }
   ]
 }
 ```
+
+`proxy_index` / `proxy_region` are `null` when the container was started without a CSV proxy row.
 
 Notes:
 

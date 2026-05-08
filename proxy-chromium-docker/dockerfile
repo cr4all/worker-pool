@@ -1,0 +1,9 @@
+FROM suyash5053/chromium-vnc-cdp:latest
+
+USER root
+
+COPY proxyext /proxyext
+
+COPY start_chromium.sh /config/start_chromium.sh
+
+RUN chmod +x /config/start_chromium.sh

@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from app.proxy_csv import ProxyRow
+
 POOL_LABEL = "chrome-pool.managed=1"
 CONTAINER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 
@@ -44,6 +46,8 @@ def run_chrome_pool_container(
     host_cdp: int,
     vnc_pass: str,
     image: str,
+    proxy: ProxyRow | None = None,
+    proxy_index: int | None = None,
 ) -> None:
     args = [
         "run",
@@ -58,8 +62,25 @@ def run_chrome_pool_container(
         f"VNC_PASS={vnc_pass}",
         "--label",
         POOL_LABEL,
-        image,
     ]
+    if proxy is not None and proxy_index is not None:
+        args.extend(
+            [
+                "-e",
+                f"PROXY_HOST={proxy.host}",
+                "-e",
+                f"PROXY_PORT={proxy.port}",
+                "-e",
+                f"PROXY_USER={proxy.user}",
+                "-e",
+                f"PROXY_PASS={proxy.password}",
+                "--label",
+                f"chrome-pool.proxy-index={proxy_index}",
+                "--label",
+                f"chrome-pool.proxy-region={proxy.region}",
+            ]
+        )
+    args.append(image)
     p = _docker(args)
     if p.returncode != 0:
         msg = (p.stderr or p.stdout or "").strip() or "docker run failed"
@@ -100,6 +121,8 @@ class PoolInstance:
     name: str
     vnc_port: int | None
     cdp_port: int | None
+    proxy_index: int | None = None
+    proxy_region: str | None = None
 
 
 def _host_port(binding: list[dict[str, str]] | None) -> int | None:
@@ -117,6 +140,18 @@ def _host_port(binding: list[dict[str, str]] | None) -> int | None:
 def _is_managed_pool_container(inspected: dict[str, Any]) -> bool:
     labels = (inspected.get("Config") or {}).get("Labels") or {}
     return labels.get("chrome-pool.managed") == "1"
+
+
+def _proxy_meta_from_labels(labels: dict[str, Any]) -> tuple[int | None, str | None]:
+    idx_raw = labels.get("chrome-pool.proxy-index")
+    region_raw = labels.get("chrome-pool.proxy-region")
+    region = region_raw if isinstance(region_raw, str) and region_raw else None
+    if idx_raw is None or idx_raw == "":
+        return None, region
+    try:
+        return int(str(idx_raw)), region
+    except ValueError:
+        return None, region
 
 
 def _container_display_name(inspected: dict[str, Any]) -> str | None:
@@ -163,7 +198,9 @@ def inspect_instance(name: str) -> PoolInstance | None:
         return None
     vnc, cdp = _extract_ports(c)
     display = _container_display_name(c) or name
-    return PoolInstance(name=display, vnc_port=vnc, cdp_port=cdp)
+    lbl = (c.get("Config") or {}).get("Labels") or {}
+    pi, pr = _proxy_meta_from_labels(lbl if isinstance(lbl, dict) else {})
+    return PoolInstance(name=display, vnc_port=vnc, cdp_port=cdp, proxy_index=pi, proxy_region=pr)
 
 
 def _bulk_inspect(names: list[str]) -> list[dict[str, Any]]:
@@ -206,7 +243,11 @@ def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[
             if not display:
                 continue
             vnc, cdp = _extract_ports(c)
-            inst = PoolInstance(name=display, vnc_port=vnc, cdp_port=cdp)
+            lbl = (c.get("Config") or {}).get("Labels") or {}
+            pi, pr = _proxy_meta_from_labels(lbl if isinstance(lbl, dict) else {})
+            inst = PoolInstance(
+                name=display, vnc_port=vnc, cdp_port=cdp, proxy_index=pi, proxy_region=pr
+            )
             if vnc is None or cdp is None:
                 pending[display] = inst
             else:

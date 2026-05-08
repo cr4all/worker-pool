@@ -13,15 +13,17 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app import docker_ops
-from app.docker_ops import DockerError, validate_container_name
+from app.docker_ops import DockerError, PoolInstance, validate_container_name
 from app.ports import allocate_sequential_pool_ports
+from app.proxy_csv import load_proxies, pick_balanced_proxy_index
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     vnc_pass: str = "mystakechrome"
-    chrome_docker_image: str = "suyash5053/chromium-vnc-cdp"
+    chrome_docker_image: str = "proxy-chrome:latest"
+    proxies_csv: str = "proxies.csv"
     start_cdp_timeout_sec: float = 60.0
     api_key: Optional[str] = None
     max_running: Optional[int] = None
@@ -77,6 +79,8 @@ class StartResponse(BaseModel):
     vnc_port: int
     cdp_port: int
     vnc_password: str
+    proxy_index: Optional[int] = None
+    proxy_region: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
@@ -96,6 +100,8 @@ class InstanceOut(BaseModel):
     name: str
     vnc_port: Optional[int]
     cdp_port: Optional[int]
+    proxy_index: Optional[int] = None
+    proxy_region: Optional[str] = None
 
 
 class ListResponse(BaseModel):
@@ -116,6 +122,14 @@ class HealthResponse(BaseModel):
     ok: bool
     docker: bool
     docker_error: Optional[str] = None
+
+
+def _proxy_usage_counts(instances: list[PoolInstance], num_proxies: int) -> list[int]:
+    counts = [0] * num_proxies
+    for inst in instances:
+        if inst.proxy_index is not None and 0 <= inst.proxy_index < num_proxies:
+            counts[inst.proxy_index] += 1
+    return counts
 
 
 async def _wait_cdp_ready(port: int, timeout_sec: float) -> None:
@@ -160,6 +174,9 @@ async def start_pool(
     if docker_ops.container_exists(name):
         raise HTTPException(status_code=409, detail=f"Container already exists: {name}")
 
+    proxy_row = None
+    proxy_idx: Optional[int] = None
+
     async with _start_lock:
         max_allowed = effective_max_running(s)
         try:
@@ -186,6 +203,13 @@ async def start_pool(
             vnc_p, cdp_p = allocate_sequential_pool_ports(used)
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
+        proxies = load_proxies(s.proxies_csv)
+        proxy_row = None
+        proxy_idx = None
+        if proxies:
+            counts = _proxy_usage_counts(instances, len(proxies))
+            proxy_idx = pick_balanced_proxy_index(counts)
+            proxy_row = proxies[proxy_idx]
         try:
             docker_ops.run_chrome_pool_container(
                 name=name,
@@ -193,6 +217,8 @@ async def start_pool(
                 host_cdp=cdp_p,
                 vnc_pass=s.vnc_pass,
                 image=s.chrome_docker_image,
+                proxy=proxy_row,
+                proxy_index=proxy_idx,
             )
         except DockerError as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
@@ -211,6 +237,8 @@ async def start_pool(
         vnc_port=vnc_p,
         cdp_port=cdp_p,
         vnc_password=s.vnc_pass,
+        proxy_index=proxy_idx,
+        proxy_region=(proxy_row.region if proxy_row else None),
     )
 
 
@@ -254,7 +282,13 @@ def list_pool() -> ListResponse:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return ListResponse(
         instances=[
-            InstanceOut(name=i.name, vnc_port=i.vnc_port, cdp_port=i.cdp_port)
+            InstanceOut(
+                name=i.name,
+                vnc_port=i.vnc_port,
+                cdp_port=i.cdp_port,
+                proxy_index=i.proxy_index,
+                proxy_region=i.proxy_region,
+            )
             for i in items
         ]
     )
