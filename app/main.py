@@ -4,18 +4,19 @@ import asyncio
 import math
 import time
 import uuid
-from typing import Annotated, Optional
+from enum import Enum
+from typing import Annotated, Optional, Self
 
 import httpx
 import psutil
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app import docker_ops
 from app.docker_ops import DockerError, PoolInstance, validate_container_name
 from app.ports import allocate_sequential_pool_ports
-from app.proxy_csv import load_proxies, pick_balanced_proxy_index
+from app.proxy_csv import ProxyRow, load_proxies, pick_balanced_proxy_index
 
 
 class Settings(BaseSettings):
@@ -70,8 +71,49 @@ def effective_max_running(s: Settings) -> int:
     return max(1, computed)
 
 
+class ProxyMode(str, Enum):
+    AUTO = "AUTO"
+    NONE = "NONE"
+    USER = "USER"
+
+
+class UserProxyIn(BaseModel):
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    user: str = ""
+    password: str = ""
+    region: Optional[str] = None
+
+    @field_validator("host")
+    @classmethod
+    def strip_host(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("host must not be empty")
+        return s
+
+    @field_validator("region")
+    @classmethod
+    def strip_region(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        return s or None
+
+
 class StartBody(BaseModel):
     name: Optional[str] = None
+    proxy: ProxyMode = ProxyMode.AUTO
+    user_proxy: Optional[UserProxyIn] = None
+
+    @model_validator(mode="after")
+    def user_proxy_matches_mode(self) -> Self:
+        if self.proxy == ProxyMode.USER:
+            if self.user_proxy is None:
+                raise ValueError("user_proxy is required when proxy is USER")
+        elif self.user_proxy is not None:
+            raise ValueError("user_proxy is only allowed when proxy is USER")
+        return self
 
 
 class StartResponse(BaseModel):
@@ -174,9 +216,6 @@ async def start_pool(
     if docker_ops.container_exists(name):
         raise HTTPException(status_code=409, detail=f"Container already exists: {name}")
 
-    proxy_row = None
-    proxy_idx: Optional[int] = None
-
     async with _start_lock:
         max_allowed = effective_max_running(s)
         try:
@@ -203,13 +242,27 @@ async def start_pool(
             vnc_p, cdp_p = allocate_sequential_pool_ports(used)
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
-        proxies = load_proxies(s.proxies_csv)
-        proxy_row = None
-        proxy_idx = None
-        if proxies:
-            counts = _proxy_usage_counts(instances, len(proxies))
-            proxy_idx = pick_balanced_proxy_index(counts)
-            proxy_row = proxies[proxy_idx]
+        proxy_row: ProxyRow | None = None
+        proxy_idx: Optional[int] = None
+        if body.proxy == ProxyMode.NONE:
+            pass
+        elif body.proxy == ProxyMode.USER:
+            assert body.user_proxy is not None
+            u = body.user_proxy
+            proxy_row = ProxyRow(
+                region=u.region or "",
+                host=u.host,
+                port=u.port,
+                user=u.user,
+                password=u.password,
+            )
+            proxy_idx = None
+        else:
+            proxies = load_proxies(s.proxies_csv)
+            if proxies:
+                counts = _proxy_usage_counts(instances, len(proxies))
+                proxy_idx = pick_balanced_proxy_index(counts)
+                proxy_row = proxies[proxy_idx]
         try:
             docker_ops.run_chrome_pool_container(
                 name=name,

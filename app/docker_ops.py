@@ -63,7 +63,7 @@ def run_chrome_pool_container(
         "--label",
         POOL_LABEL,
     ]
-    if proxy is not None and proxy_index is not None:
+    if proxy is not None:
         args.extend(
             [
                 "-e",
@@ -74,12 +74,26 @@ def run_chrome_pool_container(
                 f"PROXY_USER={proxy.user}",
                 "-e",
                 f"PROXY_PASS={proxy.password}",
-                "--label",
-                f"chrome-pool.proxy-index={proxy_index}",
-                "--label",
-                f"chrome-pool.proxy-region={proxy.region}",
             ]
         )
+        if proxy_index is not None:
+            args.extend(
+                [
+                    "--label",
+                    f"chrome-pool.proxy-index={proxy_index}",
+                    "--label",
+                    f"chrome-pool.proxy-region={proxy.region}",
+                ]
+            )
+        else:
+            args.extend(
+                [
+                    "--label",
+                    "chrome-pool.proxy-source=user",
+                    "--label",
+                    f"chrome-pool.proxy-region={proxy.region}",
+                ]
+            )
     args.append(image)
     p = _docker(args)
     if p.returncode != 0:

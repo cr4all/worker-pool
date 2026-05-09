@@ -19,9 +19,18 @@ Code reference: `app/main.py` (service `version="1.0.0"`)
 
 ### Proxies (optional)
 
-- Env `PROXIES_CSV` (default `proxies.csv`): CSV with columns `Region`, `Host`, `Port`, `User`, `Pass`.
-- If the file is missing, empty, or has no valid data rows, `POST /start` runs the pool image **without** passing `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, or `PROXY_PASS` to Docker (direct Chrome; the proxy-capable image skips loading the proxy extension when `PROXY_HOST` is unset).
-- If there is at least one valid row, the server picks a row with **minimum** number of currently running pool containers using that row’s index (random tie-break), passes the four `PROXY_*` variables, and sets labels `chrome-pool.proxy-index` and `chrome-pool.proxy-region` (no secrets in labels).
+- Env `PROXIES_CSV` (default `proxies.csv`): CSV with columns `Region`, `Host`, `Port`, `User`, `Pass`. Used only when `POST /start` sets **`proxy` to `AUTO`** (see below).
+- The pool image loads the proxy extension only when Docker receives `PROXY_HOST` (and related `PROXY_*`). Otherwise Chromium runs **direct** (no proxy extension).
+
+Per-request **`proxy`** on `POST /start` (string enum, default `AUTO`):
+
+| `proxy` | Behavior |
+|---------|----------|
+| **`AUTO`** | If `PROXIES_CSV` has at least one valid row: pick the row index with **minimum** current use among running pool containers (random tie-break), pass `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, `PROXY_PASS`, and set labels `chrome-pool.proxy-index` and `chrome-pool.proxy-region` (no secrets in labels). If the file is missing, empty, or has no valid rows: same as direct Chrome (no `PROXY_*`). |
+| **`NONE`** | Never pass `PROXY_*`, even if the CSV has rows. |
+| **`USER`** | **Required**: body field `user_proxy` with `host`, `port` (1–65535), and optional `user`, `password`, `region`. Passes `PROXY_*` from that object. Labels: `chrome-pool.proxy-source=user` and `chrome-pool.proxy-region` (from `user_proxy.region`, or empty string if omitted). No `chrome-pool.proxy-index` label. |
+
+Validation: `user_proxy` is **required** when `proxy` is `USER`, and **must be omitted** when `proxy` is `AUTO` or `NONE` → otherwise **422**.
 
 ### Auth (optional)
 
@@ -70,15 +79,46 @@ Start one Chrome container using the image from `CHROME_DOCKER_IMAGE` (default `
 
 ### Request body (JSON)
 
+All fields optional unless `proxy` is `USER`.
+
 ```json
 {}
 ```
 
-Optional:
+Name only:
 
 ```json
 { "name": "my-chrome-1" }
 ```
+
+Explicit built-in (CSV) selection — same as omitting `proxy`:
+
+```json
+{ "name": "my-chrome-1", "proxy": "AUTO" }
+```
+
+No proxy:
+
+```json
+{ "proxy": "NONE" }
+```
+
+Caller-supplied proxy:
+
+```json
+{
+  "proxy": "USER",
+  "user_proxy": {
+    "host": "proxy.example.com",
+    "port": 8888,
+    "user": "alice",
+    "password": "secret",
+    "region": "KR"
+  }
+}
+```
+
+`user_proxy.user` and `user_proxy.password` default to empty strings if omitted. `user_proxy.region` is optional.
 
 ### 200 response
 
@@ -93,7 +133,8 @@ Optional:
 }
 ```
 
-When no proxy was assigned, `proxy_index` and `proxy_region` are JSON `null`.
+- **`proxy_index`**: set only when `proxy` was `AUTO` and a CSV row was used; **`null`** for `NONE`, for `AUTO` with no CSV rows, or for `USER`.
+- **`proxy_region`**: `null` only when no proxy was applied (`NONE`, or `AUTO` with no valid CSV rows). Otherwise the region string from the CSV row or from `user_proxy.region` (may be an empty string `""` if the CSV or request left region blank).
 
 ### Status codes
 
@@ -102,7 +143,7 @@ When no proxy was assigned, `proxy_index` and `proxy_region` are JSON `null`.
 - **500**: docker run failed / CDP not ready within timeout
 - **503**: no free sequential port slot
 - **429**: global limit reached (no queue; rejected immediately)
-- **422**: invalid JSON / body validation failed
+- **422**: invalid JSON / body validation failed (e.g. `USER` without `user_proxy`, or `user_proxy` present when `proxy` is not `USER`)
 
 #### 429 response body example
 
@@ -189,7 +230,7 @@ List running pool-managed containers and their host ports.
 }
 ```
 
-`proxy_index` / `proxy_region` are `null` when the container was started without a CSV proxy row.
+`proxy_index` is `null` unless the instance was started with **`AUTO`** and a CSV row was used. `proxy_region` is `null` only when no proxy is in use; otherwise it matches the Docker label (CSV or `USER` request; may be `""`).
 
 Notes:
 
