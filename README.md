@@ -47,6 +47,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 | `START_CDP_TIMEOUT_SEC` | Seconds to wait for CDP after start | `60` |
 | `API_KEY` | If set, requires `Authorization: Bearer <key>` | (unset) |
 | `MAX_RUNNING` | Max number of running pool containers. If unset, auto-computed from RAM (`floor(totalGiB * 0.85)`, min 1). | (auto) |
+| `NOVNC_DOMAIN` | If set (e.g. `example.com`), `/start` includes `novnc_url`: `https://web-<novnc_port>.<domain>/index.html?password=…` | (unset) |
 
 You can also set these in a `.env` file.
 
@@ -75,10 +76,13 @@ On success:
   "cdp_port": 9223,
   "novnc_port": 6080,
   "vnc_password": "mystakechrome",
+  "novnc_url": "https://web-6080.example.com/index.html?password=mystakechrome",
   "proxy_index": 0,
   "proxy_region": "UK"
 }
 ```
+
+If `NOVNC_DOMAIN` is not set, `novnc_url` is `null`.
 
 When no proxy row was used, `proxy_index` and `proxy_region` are `null`.
 

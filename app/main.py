@@ -4,6 +4,7 @@ import asyncio
 import math
 import time
 import uuid
+from urllib.parse import quote
 from enum import Enum
 from typing import Annotated, Optional, Self
 
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     start_cdp_timeout_sec: float = 60.0
     api_key: Optional[str] = None
     max_running: Optional[int] = None
+    novnc_domain: Optional[str] = None
 
 
 settings = Settings()
@@ -133,6 +135,7 @@ class StartResponse(BaseModel):
     cdp_port: int
     novnc_port: int
     vnc_password: str
+    novnc_url: Optional[str] = None
     proxy_index: Optional[int] = None
     proxy_region: Optional[str] = None
 
@@ -185,6 +188,13 @@ def _proxy_usage_counts(instances: list[PoolInstance], num_proxies: int) -> list
         if inst.proxy_index is not None and 0 <= inst.proxy_index < num_proxies:
             counts[inst.proxy_index] += 1
     return counts
+
+
+def _novnc_public_url(domain: str, novnc_host_port: int, password: str) -> str:
+    """https://web-<hostPort>.<domain>/index.html?password=<url-encoded password>"""
+    d = domain.strip().strip("/")
+    host = f"web-{novnc_host_port}.{d}"
+    return f"https://{host}/index.html?password={quote(password, safe='')}"
 
 
 async def _wait_cdp_ready(port: int, timeout_sec: float) -> None:
@@ -302,12 +312,17 @@ async def start_pool(
             pass
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+    novnc_url: str | None = None
+    if s.novnc_domain and s.novnc_domain.strip():
+        novnc_url = _novnc_public_url(s.novnc_domain, novnc_p, vnc_pass_effective)
+
     return StartResponse(
         name=name,
         vnc_port=vnc_p,
         cdp_port=cdp_p,
         novnc_port=novnc_p,
         vnc_password=vnc_pass_effective,
+        novnc_url=novnc_url,
         proxy_index=proxy_idx,
         proxy_region=(proxy_row.region if proxy_row else None),
     )
