@@ -73,6 +73,7 @@ On success:
   "name": "chrome-pool-abc123",
   "vnc_port": 5901,
   "cdp_port": 9223,
+  "novnc_port": 6080,
   "vnc_password": "mystakechrome",
   "proxy_index": 0,
   "proxy_region": "UK"
@@ -81,11 +82,11 @@ On success:
 
 When no proxy row was used, `proxy_index` and `proxy_region` are `null`.
 
-VNC listens on `vnc_port`; Chrome DevTools Protocol is at `http://127.0.0.1:<cdp_port>`.
+VNC listens on `vnc_port`; Chrome DevTools Protocol is at `http://127.0.0.1:<cdp_port>`; noVNC web UI is at `http://127.0.0.1:<novnc_port>`.
 
 **Proxies**: If `PROXIES_CSV` has valid rows, each `/start` picks a row with **minimum current use** among running pool containers (random tie-break) and passes `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, `PROXY_PASS` to Docker.
 
-**Port rules**: The first instance uses VNC **5901** and CDP **9223**; each additional instance uses the next pair (**5902·9224**, **5903·9225**, …). Slots already used by pool containers or otherwise bound on the host are skipped.
+**Port rules**: The first instance uses VNC **5901**, CDP **9223**, and noVNC **6080**; each additional instance uses the next triple (**5902·9224·6081**, **5903·9225·6082**, …). Slots already used by pool containers or otherwise bound on the host are skipped.
 
 ### `POST /stop`
 

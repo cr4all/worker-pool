@@ -44,6 +44,7 @@ def run_chrome_pool_container(
     name: str,
     host_vnc: int,
     host_cdp: int,
+    host_novnc: int,
     vnc_pass: str,
     image: str,
     proxy: ProxyRow | None = None,
@@ -58,6 +59,8 @@ def run_chrome_pool_container(
         f"{host_vnc}:5900",
         "-p",
         f"{host_cdp}:9222",
+        "-p",
+        f"{host_novnc}:8080",
         "-e",
         f"VNC_PASS={vnc_pass}",
         "--label",
@@ -135,6 +138,7 @@ class PoolInstance:
     name: str
     vnc_port: int | None
     cdp_port: int | None
+    novnc_port: int | None = None
     proxy_index: int | None = None
     proxy_region: str | None = None
 
@@ -178,18 +182,26 @@ def _container_display_name(inspected: dict[str, Any]) -> str | None:
     return None
 
 
-def _extract_ports(inspected: dict[str, Any]) -> tuple[int | None, int | None]:
+def _extract_ports(
+    inspected: dict[str, Any],
+) -> tuple[int | None, int | None, int | None]:
     # Prefer HostConfig.PortBindings, but fall back to NetworkSettings.Ports.
     bindings = (inspected.get("HostConfig") or {}).get("PortBindings") or {}
     vnc = _host_port(bindings.get("5900/tcp"))
     cdp = _host_port(bindings.get("9222/tcp"))
-    if vnc is not None and cdp is not None:
-        return vnc, cdp
+    novnc = _host_port(bindings.get("8080/tcp"))
+    if vnc is not None and cdp is not None and novnc is not None:
+        return vnc, cdp, novnc
 
     ports = (inspected.get("NetworkSettings") or {}).get("Ports") or {}
     vnc2 = _host_port(ports.get("5900/tcp"))
     cdp2 = _host_port(ports.get("9222/tcp"))
-    return (vnc if vnc is not None else vnc2), (cdp if cdp is not None else cdp2)
+    novnc2 = _host_port(ports.get("8080/tcp"))
+    return (
+        (vnc if vnc is not None else vnc2),
+        (cdp if cdp is not None else cdp2),
+        (novnc if novnc is not None else novnc2),
+    )
 
 
 def inspect_instance(name: str) -> PoolInstance | None:
@@ -210,11 +222,18 @@ def inspect_instance(name: str) -> PoolInstance | None:
     c = data[0]
     if not _is_managed_pool_container(c):
         return None
-    vnc, cdp = _extract_ports(c)
+    vnc, cdp, novnc = _extract_ports(c)
     display = _container_display_name(c) or name
     lbl = (c.get("Config") or {}).get("Labels") or {}
     pi, pr = _proxy_meta_from_labels(lbl if isinstance(lbl, dict) else {})
-    return PoolInstance(name=display, vnc_port=vnc, cdp_port=cdp, proxy_index=pi, proxy_region=pr)
+    return PoolInstance(
+        name=display,
+        vnc_port=vnc,
+        cdp_port=cdp,
+        novnc_port=novnc,
+        proxy_index=pi,
+        proxy_region=pr,
+    )
 
 
 def _bulk_inspect(names: list[str]) -> list[dict[str, Any]]:
@@ -239,7 +258,8 @@ def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[
 
     Under concurrent /start calls, Docker may briefly report a container without port bindings.
     This function retries a few times so /list returns a complete container list.
-    If ports are still not available after retries, the instance is still returned with ports=None.
+    If ports are still not available after retries, the instance is still returned with any of
+    vnc_port/cdp_port/novnc_port possibly None.
     """
     names = list_pool_container_names()
     if not names:
@@ -256,13 +276,18 @@ def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[
             display = _container_display_name(c)
             if not display:
                 continue
-            vnc, cdp = _extract_ports(c)
+            vnc, cdp, novnc = _extract_ports(c)
             lbl = (c.get("Config") or {}).get("Labels") or {}
             pi, pr = _proxy_meta_from_labels(lbl if isinstance(lbl, dict) else {})
             inst = PoolInstance(
-                name=display, vnc_port=vnc, cdp_port=cdp, proxy_index=pi, proxy_region=pr
+                name=display,
+                vnc_port=vnc,
+                cdp_port=cdp,
+                novnc_port=novnc,
+                proxy_index=pi,
+                proxy_region=pr,
             )
-            if vnc is None or cdp is None:
+            if vnc is None or cdp is None or novnc is None:
                 pending[display] = inst
             else:
                 ready[display] = inst

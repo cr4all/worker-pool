@@ -103,8 +103,19 @@ class UserProxyIn(BaseModel):
 
 class StartBody(BaseModel):
     name: Optional[str] = None
+    vnc_password: Optional[str] = Field(default=None, max_length=128)
     proxy: ProxyMode = ProxyMode.AUTO
     user_proxy: Optional[UserProxyIn] = None
+
+    @field_validator("vnc_password")
+    @classmethod
+    def vnc_password_strip_nonempty(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip()
+        if not s:
+            raise ValueError("vnc_password must not be empty when provided")
+        return s
 
     @model_validator(mode="after")
     def user_proxy_matches_mode(self) -> Self:
@@ -120,6 +131,7 @@ class StartResponse(BaseModel):
     name: str
     vnc_port: int
     cdp_port: int
+    novnc_port: int
     vnc_password: str
     proxy_index: Optional[int] = None
     proxy_region: Optional[str] = None
@@ -142,6 +154,7 @@ class InstanceOut(BaseModel):
     name: str
     vnc_port: Optional[int]
     cdp_port: Optional[int]
+    novnc_port: Optional[int] = None
     proxy_index: Optional[int] = None
     proxy_region: Optional[str] = None
 
@@ -238,10 +251,13 @@ async def start_pool(
                 used.add(inst.vnc_port)
             if inst.cdp_port is not None:
                 used.add(inst.cdp_port)
+            if inst.novnc_port is not None:
+                used.add(inst.novnc_port)
         try:
-            vnc_p, cdp_p = allocate_sequential_pool_ports(used)
+            vnc_p, cdp_p, novnc_p = allocate_sequential_pool_ports(used)
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
+        vnc_pass_effective = body.vnc_password if body.vnc_password is not None else s.vnc_pass
         proxy_row: ProxyRow | None = None
         proxy_idx: Optional[int] = None
         if body.proxy == ProxyMode.NONE:
@@ -268,7 +284,8 @@ async def start_pool(
                 name=name,
                 host_vnc=vnc_p,
                 host_cdp=cdp_p,
-                vnc_pass=s.vnc_pass,
+                host_novnc=novnc_p,
+                vnc_pass=vnc_pass_effective,
                 image=s.chrome_docker_image,
                 proxy=proxy_row,
                 proxy_index=proxy_idx,
@@ -289,7 +306,8 @@ async def start_pool(
         name=name,
         vnc_port=vnc_p,
         cdp_port=cdp_p,
-        vnc_password=s.vnc_pass,
+        novnc_port=novnc_p,
+        vnc_password=vnc_pass_effective,
         proxy_index=proxy_idx,
         proxy_region=(proxy_row.region if proxy_row else None),
     )
@@ -339,6 +357,7 @@ def list_pool() -> ListResponse:
                 name=i.name,
                 vnc_port=i.vnc_port,
                 cdp_port=i.cdp_port,
+                novnc_port=i.novnc_port,
                 proxy_index=i.proxy_index,
                 proxy_region=i.proxy_region,
             )

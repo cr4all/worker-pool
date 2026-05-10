@@ -74,12 +74,15 @@ Start one Chrome container using the image from `CHROME_DOCKER_IMAGE` (default `
 
 - container `5900/tcp` → host VNC port
 - container `9222/tcp` → host CDP port
+- container `8080/tcp` (noVNC web UI) → host `novnc_port`
 
 **Auth**: required if `API_KEY` is set
 
 ### Request body (JSON)
 
 All fields optional unless `proxy` is `USER`.
+
+- **`vnc_password`** (string, optional): VNC password passed to the container as `VNC_PASS`. If omitted, the server uses env `VNC_PASS` (default `mystakechrome`). Must be non-empty when sent (after trim); max length 128.
 
 ```json
 {}
@@ -89,6 +92,12 @@ Name only:
 
 ```json
 { "name": "my-chrome-1" }
+```
+
+Custom VNC password for this instance:
+
+```json
+{ "name": "my-chrome-1", "vnc_password": "my-secret" }
 ```
 
 Explicit built-in (CSV) selection — same as omitting `proxy`:
@@ -127,6 +136,7 @@ Caller-supplied proxy:
   "name": "chrome-pool-abc123def456",
   "vnc_port": 5901,
   "cdp_port": 9223,
+  "novnc_port": 6080,
   "vnc_password": "mystakechrome",
   "proxy_index": 0,
   "proxy_region": "UK"
@@ -223,6 +233,7 @@ List running pool-managed containers and their host ports.
       "name": "chrome-pool-a",
       "vnc_port": 5901,
       "cdp_port": 9223,
+      "novnc_port": 6080,
       "proxy_index": 0,
       "proxy_region": "UK"
     }
@@ -234,13 +245,14 @@ List running pool-managed containers and their host ports.
 
 Notes:
 
-- Under heavy concurrency, Docker may briefly return a container before its port bindings are visible via `inspect`. In that case this API may temporarily return `null` for `vnc_port`/`cdp_port`, but the container **name will still be listed**, so the count stays correct.
+- Under heavy concurrency, Docker may briefly return a container before its port bindings are visible via `inspect`. In that case this API may temporarily return `null` for `vnc_port`/`cdp_port`/`novnc_port`, but the container **name will still be listed**, so the count stays correct.
 
 ---
 
 ## Port allocation policy
 
 - Slot \(k = 0, 1, 2, ...\)
-- Host VNC port: `5901 + k`
-- Host CDP port: `9223 + k`
+- Host VNC port: `5901 + k` → container `5900/tcp`
+- Host CDP port: `9223 + k` → container `9222/tcp`
+- Host noVNC port: `6080 + k` → container `8080/tcp`
 - Slots already used by the pool, or not bindable on the host, are skipped.
