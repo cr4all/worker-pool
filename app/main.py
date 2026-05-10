@@ -191,10 +191,11 @@ def _proxy_usage_counts(instances: list[PoolInstance], num_proxies: int) -> list
 
 
 def _novnc_public_url(domain: str, novnc_host_port: int, password: str) -> str:
-    """https://web-<hostPort>.<domain>/index.html?password=<url-encoded password>"""
+    """https://web-<hostPort>.<domain>/vnc.html?autoconnect=1&password=<url-encoded>"""
     d = domain.strip().strip("/")
     host = f"web-{novnc_host_port}.{d}"
-    return f"https://{host}/index.html?password={quote(password, safe='')}"
+    q = quote(password, safe="")
+    return f"https://{host}/vnc.html?autoconnect=1&password={q}"
 
 
 async def _wait_cdp_ready(port: int, timeout_sec: float) -> None:

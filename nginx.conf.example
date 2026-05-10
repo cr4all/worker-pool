@@ -1,5 +1,8 @@
-# /etc/nginx/nginx.conf
-# or sites-enabled/serverbot.conf
+# Example nginx.conf fragment — aimed at nginx 1.24.x (stable/mainline packages).
+# Typical paths:
+#   Full file:     /etc/nginx/nginx.conf
+#   Or include:    include /etc/nginx/conf.d/ultrasportsbot.conf;
+#   Debian/Ubuntu: sites-enabled via symlink into sites-available.
 
 worker_processes auto;
 
@@ -9,32 +12,35 @@ events {
 
 http {
 
-    include       mime.types;
+    include       /etc/nginx/mime.types;
+    # If this path does not exist (e.g. custom prefix), use: include mime.types;
     default_type  application/octet-stream;
 
-    sendfile on;
-    keepalive_timeout 65;
+    sendfile        on;
+    tcp_nopush      on;
+    keepalive_timeout  65;
 
     ########################################################
-    # web-6080.serverbot.com -> 127.0.0.1:6080
-    # web-6081.serverbot.com -> 127.0.0.1:6081
+    # Host-based routing for noVNC (same pattern as worker-pool NOVNC_DOMAIN):
+    #   https://web-6080.ultrasportsbot.com -> 127.0.0.1:6080
+    #   https://web-6081.ultrasportsbot.com -> 127.0.0.1:6081
     ########################################################
 
     map $host $backend_port {
 
-        # Allowed host port range: 6080 ~ 6200
-        ~^web-(608[0-9]|609[0-9]|61[0-9]{2}|6200)\.serverbot\.com$ $1;
+        # Allowed host port range: 6080 ~ 6200 (matches capture group $1)
+        ~^web-(608[0-9]|609[0-9]|61[0-9]{2}|6200)\.ultrasportsbot\.com$ $1;
 
         default 0;
     }
 
     ########################################################
-    # Main controller (upstream API)
+    # Main controller API (uvicorn / worker-pool)
     ########################################################
 
     server {
         listen 80;
-        server_name ctrl.serverbot.com;
+        server_name ctrl.ultrasportsbot.com;
 
         location / {
 
@@ -42,27 +48,27 @@ http {
 
             proxy_http_version 1.1;
 
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
 
-            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Upgrade    $http_upgrade;
             proxy_set_header Connection "upgrade";
         }
     }
 
     ########################################################
-    # noVNC dynamic proxy
+    # noVNC dynamic proxy (WebSocket + long-lived sessions)
     ########################################################
 
     server {
 
         listen 80;
 
-        server_name ~^web-(608[0-9]|609[0-9]|61[0-9]{2}|6200)\.serverbot\.com$;
+        server_name ~^web-(608[0-9]|609[0-9]|61[0-9]{2}|6200)\.ultrasportsbot\.com$;
 
-        # Reject requests that do not match an allowed port
+        # Disallow hostnames outside the map (invalid / unknown subdomain)
         if ($backend_port = 0) {
             return 403;
         }
@@ -73,20 +79,18 @@ http {
 
             proxy_http_version 1.1;
 
-            # WebSocket support (required for noVNC)
-            proxy_set_header Upgrade $http_upgrade;
+            # WebSocket (required for noVNC)
+            proxy_set_header Upgrade    $http_upgrade;
             proxy_set_header Connection "upgrade";
 
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
 
-            # Long timeouts for noVNC sessions
-            proxy_read_timeout 86400;
-            proxy_send_timeout 86400;
+            proxy_read_timeout  86400s;
+            proxy_send_timeout  86400s;
 
-            # Disable buffering
             proxy_buffering off;
         }
     }

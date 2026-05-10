@@ -138,13 +138,13 @@ Caller-supplied proxy:
   "cdp_port": 9223,
   "novnc_port": 6080,
   "vnc_password": "mystakechrome",
-  "novnc_url": "https://web-6080.example.com/index.html?password=mystakechrome",
+  "novnc_url": "https://web-6080.example.com/vnc.html?autoconnect=1&password=mystakechrome",
   "proxy_index": 0,
   "proxy_region": "UK"
 }
 ```
 
-- **`novnc_url`**: present when env **`NOVNC_DOMAIN`** is set (e.g. `example.com`). Built as `https://web-<novnc_port>.<NOVNC_DOMAIN>/index.html?password=<url-encoded effective VNC password>` (same password as `vnc_password`: request `vnc_password` or default `VNC_PASS`). **`null`** when `NOVNC_DOMAIN` is unset or blank.
+- **`novnc_url`**: present when env **`NOVNC_DOMAIN`** is set (e.g. `example.com`). Built as `https://web-<novnc_port>.<NOVNC_DOMAIN>/vnc.html?autoconnect=1&password=<url-encoded effective VNC password>` (same password as `vnc_password`: request `vnc_password` or default `VNC_PASS`). **`null`** when `NOVNC_DOMAIN` is unset or blank.
 - **`proxy_index`**: set only when `proxy` was `AUTO` and a CSV row was used; **`null`** for `NONE`, for `AUTO` with no CSV rows, or for `USER`.
 - **`proxy_region`**: `null` only when no proxy was applied (`NONE`, or `AUTO` with no valid CSV rows). Otherwise the region string from the CSV row or from `user_proxy.region` (may be an empty string `""` if the CSV or request left region blank).
 
