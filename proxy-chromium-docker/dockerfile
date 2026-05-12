@@ -1,9 +1,56 @@
-FROM suyash5053/chromium-vnc-cdp:latest
+FROM alpine:edge
 
-USER root
+ENV DISPLAY=:0
+ENV VNC_WIDTH=1920
+ENV VNC_HEIGHT=1080
+ENV VNC_PASS=password
+ENV START_URL=https://www.google.com/
+
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+
+
+RUN apk update && apk upgrade
+
+# GUI + automation stack + chromium 148 (Alpine 3.24 repo)
+RUN apk add --no-cache \
+    chromium \
+    xvfb \
+    x11vnc \
+    openbox \
+    supervisor \
+    tini \
+    bash \
+    curl \
+    wget \
+    socat \
+    websockify
+
+# Chromium runtime dependencies (Alpine 3.24)
+RUN apk add --no-cache \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
+    alsa-lib \
+    gtk+3.0 \
+    libdrm \
+    mesa-gl \
+    mesa-gbm \
+    libx11 \
+    libxcomposite \
+    libxdamage \
+    libxfixes \
+    libxrandr \
+    libxkbcommon \
+    at-spi2-core
+
+EXPOSE 5900 8080 9222
+
+COPY config /config
+RUN chmod +x /config/*.sh
 
 COPY proxyext /proxyext
 
-COPY start_chromium.sh /config/start_chromium.sh
-
-RUN chmod +x /config/start_chromium.sh
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["/usr/bin/supervisord", "-c", "/config/supervisord.conf"]

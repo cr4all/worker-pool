@@ -23,11 +23,23 @@ If the network is slow, use `pip install -r requirements.txt --default-timeout=3
 
 ## Proxy Chrome image (optional)
 
-To use CSV-based proxies and MV3 auth proxy inside the browser, build the child image once:
+The pool’s default image is `proxy-chrome:latest`, built from [`proxy-chromium-docker/dockerfile`](proxy-chromium-docker/dockerfile). Build context must be the whole `proxy-chromium-docker` directory (it copies `config/` and `proxyext/` into the image).
+
+### Build / rebuild
+
+From the `worker-pool` repo root:
 
 ```bash
 docker build -t proxy-chrome:latest -f proxy-chromium-docker/dockerfile proxy-chromium-docker
 ```
+
+Rebuild after changing the Dockerfile, anything under `proxy-chromium-docker/config/`, or `proxy-chromium-docker/proxyext/`. On Windows hosts, the Dockerfile runs `chmod +x /config/*.sh` so supervisord can execute the startup scripts (execute bits from `COPY` are not reliable cross‑platform).
+
+### What’s in the image
+
+- **Base**: Alpine edge; **process init**: `tini`; **supervisor**: `supervisord` runs Xvfb, Openbox, x11vnc, websockify, and Chromium.
+- **Packages**: Chromium, Xvfb, x11vnc, Openbox, websockify, and libraries needed for headful Chromium (GTK, Mesa, fonts, etc.).
+- **Defaults** (overridable at `docker run`): `DISPLAY=:0`, `VNC_WIDTH` / `VNC_HEIGHT`, `VNC_PASS`, `START_URL` (see the Dockerfile `ENV` lines).
 
 At container start, if `PROXY_HOST` is set, the image applies `PROXY_*` to the extension; otherwise Chromium runs **without** the proxy extension. The API passes `PROXY_*` only when `proxies.csv` (see `PROXIES_CSV`) has at least one valid row; if the file is missing or empty, `/start` runs the same image **without** those environment variables.
 
