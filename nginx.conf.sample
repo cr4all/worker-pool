@@ -1,0 +1,93 @@
+# /etc/nginx/nginx.conf
+# or sites-enabled/serverbot.conf
+
+#worker_processes auto;
+
+events {
+    worker_connections 4096;
+}
+
+http {
+
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    sendfile on;
+    keepalive_timeout 65;
+
+    ########################################################
+    # web-6080.serverbot.com -> 127.0.0.1:6080
+    # web-6081.serverbot.com -> 127.0.0.1:6081
+    ########################################################
+
+    map $host $backend_port {
+
+        # Allowed host port range: 6080 ~ 6200
+        ~^web-(608[0-9]|609[0-9]|61[0-9][0-9]|6200)\.ultrasportsbot\.com$ $1;
+
+        default 0;
+    }
+
+    ########################################################
+    # Main controller (upstream API)
+    ########################################################
+
+    server {
+        listen 80;
+        server_name docker1.ultrasportsbot.com;
+
+        location / {
+
+            proxy_pass http://127.0.0.1:8888;
+
+            proxy_http_version 1.1;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+
+    ########################################################
+    # noVNC dynamic proxy
+    ########################################################
+
+    server {
+
+        listen 80;
+
+        server_name ~^web-(608[0-9]|609[0-9]|61[0-9][0-9]|6200)\.ultrasportsbot\.com$;
+
+        # Reject requests that do not match an allowed port
+        if ($backend_port = 0) {
+            return 403;
+        }
+
+        location / {
+
+            proxy_pass http://127.0.0.1:$backend_port;
+
+            proxy_http_version 1.1;
+
+            # WebSocket support (required for noVNC)
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Long timeouts for noVNC sessions
+            proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
+
+            # Disable buffering
+            proxy_buffering off;
+        }
+    }
+}

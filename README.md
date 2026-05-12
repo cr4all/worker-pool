@@ -45,6 +45,14 @@ At container start, if `PROXY_HOST` is set, the image applies `PROXY_*` to the e
 
 ## Run
 
+From the `worker-pool` directory (after activating the venv). Listen port is read from **`API_PORT`** in `.env` (default `8080`):
+
+```bash
+python -m app.main
+```
+
+You can still run Uvicorn directly; then set `--port` yourself (it does not read `API_PORT`):
+
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
@@ -53,6 +61,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `API_PORT` | TCP port for FastAPI when using `python -m app.main` | `8080` |
 | `VNC_PASS` | VNC password | `mystakechrome` |
 | `CHROME_DOCKER_IMAGE` | Image to run | `proxy-chrome:latest` |
 | `PROXIES_CSV` | Path to CSV (`Region,Host,Port,User,Pass`). Missing or no valid rows: no `PROXY_*` on `docker run`. | `proxies.csv` |
@@ -62,6 +71,27 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 | `NOVNC_DOMAIN` | If set (e.g. `example.com`), `/start` includes `novnc_url`: `https://web-<novnc_port>.<domain>/vnc.html?autoconnect=1&password=…` | (unset) |
 
 You can also set these in a `.env` file.
+
+## Reverse proxy with nginx (`nginx.conf.sample`)
+
+[`nginx.conf.sample`](nginx.conf.sample) is a **reference** layout for running the pool API and noVNC behind nginx on the same machine as Docker and Uvicorn. It is not a complete production `nginx.conf` by itself (adjust `include` paths and TLS to match your OS layout).
+
+### What it does
+
+1. **Pool HTTP API** — `server { server_name docker1.ultrasportsbot.com; ... }` proxies `/` to `http://127.0.0.1:8888`. Point that port at whatever you use for **`API_PORT`** (the sample uses `8888`; change it to match `.env`).
+2. **noVNC by hostname** — A `map $host $backend_port` parses subdomains `web-<port>.<domain>` for **6080–6200** and proxies to `http://127.0.0.1:$backend_port`. That matches how **`NOVNC_DOMAIN`** builds `novnc_url` in `/start` responses (`web-<novnc_port>.<NOVNC_DOMAIN>`). Hostnames outside that pattern get **403**.
+
+### How to use it
+
+1. Copy the `http { ... }` blocks you need into your real nginx config (e.g. main `nginx.conf` under `http { }`, or a snippet under `conf.d/` included from `http`).
+2. Replace placeholder domains:
+   - `ultrasportsbot.com` → the same domain you set in **`NOVNC_DOMAIN`** (so returned `novnc_url` hosts resolve through this nginx).
+   - `docker1.ultrasportsbot.com` → the hostname you want for the FastAPI pool (DNS must point at this nginx).
+3. Set `proxy_pass http://127.0.0.1:<API_PORT>;` in the API `server` block so it matches **`API_PORT`** in `.env`.
+4. Keep the **`map` regex** and the **second `server_name` regex** aligned with each other and with the port range your pool actually uses (default pool noVNC starts at **6080**; the sample allows **6080–6200**).
+5. Run `nginx -t` and reload nginx (`nginx -s reload` or your service manager).
+
+The sample listens on **port 80** only. In production, add **TLS** (`listen 443 ssl`, certificates) or terminate TLS in front of nginx. WebSockets are enabled for noVNC (`Upgrade` / `Connection` headers, long timeouts).
 
 ## API
 

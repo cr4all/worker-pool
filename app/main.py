@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     api_key: Optional[str] = None
     max_running: Optional[int] = None
     novnc_domain: Optional[str] = None
+    api_port: int = Field(default=8080, ge=1, le=65535)
 
 
 settings = Settings()
@@ -380,3 +381,9 @@ def list_pool() -> ListResponse:
             for i in items
         ]
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=settings.api_port)
