@@ -1,6 +1,11 @@
 import socket
 from contextlib import closing
 
+# Slot N: VNC = VNC_HOST_BASE + N, CDP = CDP_HOST_BASE + N,
+# noVNC (container 8080/tcp) = NOVNC_HOST_BASE + N (N = 0, 1, 2, ...)
+VNC_HOST_BASE = 5901
+CDP_HOST_BASE = 9223
+NOVNC_HOST_BASE = 6080
 _MAX_SLOT = 10_000
 
 
