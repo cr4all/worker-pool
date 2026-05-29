@@ -60,7 +60,12 @@ jq -n \
         strict_route: false,
         auto_redirect: false,
         route_address: ["0.0.0.0/1", "128.0.0.0/1"],
-        route_exclude_address: ["172.19.0.0/30"],
+        route_exclude_address: [
+          "172.19.0.0/30",
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16"
+        ],
         stack: "system",
         sniff: true,
         sniff_override_destination: true
