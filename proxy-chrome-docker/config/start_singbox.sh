@@ -58,8 +58,8 @@ jq -n \
         auto_route: true,
         strict_route: false,
         auto_redirect: false,
-        inet4_route_address: ["0.0.0.0/1", "128.0.0.0/1"],
-        inet4_route_exclude_address: ["172.19.0.0/30"],
+        route_address: ["0.0.0.0/1", "128.0.0.0/1"],
+        route_exclude_address: ["172.19.0.0/30"],
         stack: "system",
         sniff: true,
         sniff_override_destination: true
