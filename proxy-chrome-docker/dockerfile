@@ -8,6 +8,8 @@ ENV VNC_PASS=password
 ENV START_URL=https://www.google.com/
 ENV PORT=8080
 
+ARG SING_BOX_VERSION=1.11.15
+
 RUN apt-get update && apt-get upgrade -y
 
 RUN apt-get install -y --no-install-recommends \
@@ -43,12 +45,18 @@ RUN apt-get install -y --no-install-recommends \
     libxrandr2 \
     xdg-utils \
     openssl \
+    iproute2 \
+    jq \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
         | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
         > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends google-chrome-stable \
+    && curl -fsSL -o /tmp/sing-box.deb \
+        "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box_${SING_BOX_VERSION}_linux_amd64.deb" \
+    && dpkg -i /tmp/sing-box.deb \
+    && rm -f /tmp/sing-box.deb \
     && ln -sf /usr/share/novnc /opt/noVNC \
     && openssl req -new -x509 -days 3650 -nodes \
         -out /etc/ssl/novnc.cert \
@@ -60,8 +68,6 @@ EXPOSE 5900 8080 9222
 
 COPY config /config
 RUN chmod +x /config/*.sh
-
-COPY proxyext /proxyext
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/bin/supervisord", "-c", "/config/supervisord.conf"]

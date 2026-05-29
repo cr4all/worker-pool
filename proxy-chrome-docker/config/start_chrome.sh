@@ -1,7 +1,5 @@
 #!/bin/bash
 
-PROXY_EXT_DIR="/tmp/proxyext"
-
 CHROME_COMMON=(
   --no-sandbox
   --disable-sync
@@ -17,15 +15,11 @@ CHROME_COMMON=(
   --remote-debugging-address=127.0.0.1
 
   # stability for VNC/headful environments
-  --disable-features=VizDisplayCompositor,DisableLoadExtensionCommandLineSwitch
+  --disable-features=VizDisplayCompositor
   --disable-background-timer-throttling
   --disable-renderer-backgrounding
   --disable-backgrounding-occluded-windows
 )
-
-escape_sed_replacement() {
-  printf '%s' "$1" | sed -e 's/[\\/&|]/\\&/g'
-}
 
 setup_chrome_profile() {
   local prefs_dir="/tmp/chrome-user-data/Default"
@@ -50,37 +44,24 @@ EOF
   fi
 }
 
-prepare_proxy_extension() {
-  local host port user pass
-
-  rm -rf "$PROXY_EXT_DIR"
-  cp -a /proxyext/. "$PROXY_EXT_DIR/"
-  cp "$PROXY_EXT_DIR/background.js.template" "$PROXY_EXT_DIR/background.js"
-
-  host=$(escape_sed_replacement "$PROXY_HOST")
-  port=$(escape_sed_replacement "$PROXY_PORT")
-  user=$(escape_sed_replacement "$PROXY_USER")
-  pass=$(escape_sed_replacement "$PROXY_PASS")
-
-  sed -i "s|__PROXY_HOST__|${host}|g" "$PROXY_EXT_DIR/background.js"
-  sed -i "s|__PROXY_PORT__|${port}|g" "$PROXY_EXT_DIR/background.js"
-  sed -i "s|__PROXY_USER__|${user}|g" "$PROXY_EXT_DIR/background.js"
-  sed -i "s|__PROXY_PASS__|${pass}|g" "$PROXY_EXT_DIR/background.js"
+wait_for_tun() {
+  for _ in $(seq 1 60); do
+    if ip link show tun0 >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "ERROR: tun0 did not come up; check sing-box logs" >&2
+  return 1
 }
 
 setup_chrome_profile
 
 if [ -n "${PROXY_HOST:-}" ]; then
-  prepare_proxy_extension
-
-  google-chrome-stable \
-    --disable-extensions-except="$PROXY_EXT_DIR" \
-    --load-extension="$PROXY_EXT_DIR" \
-    "${CHROME_COMMON[@]}" \
-    "$START_URL" &
-else
-  google-chrome-stable "${CHROME_COMMON[@]}" "$START_URL" &
+  wait_for_tun
 fi
+
+google-chrome-stable "${CHROME_COMMON[@]}" "$START_URL" &
 
 sleep 2
 
