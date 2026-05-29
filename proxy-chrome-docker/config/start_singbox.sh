@@ -7,11 +7,11 @@ fi
 
 : "${PROXY_PORT:?PROXY_PORT is required when PROXY_HOST is set}"
 
+PROXY_LOCAL_PORT="${PROXY_LOCAL_PORT:-7890}"
+
 CONFIG_DIR=/tmp/sing-box
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 mkdir -p "$CONFIG_DIR"
-
-sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
 
 proxy_outbound="$(jq -n \
   --arg host "$PROXY_HOST" \
@@ -34,41 +34,17 @@ else
 fi
 
 jq -n \
+  --argjson port "$PROXY_LOCAL_PORT" \
   --argjson proxy "$proxy_outbound" \
   --argjson proxy_direct_rule "$proxy_direct_rule" \
   '{
     log: { level: "info", timestamp: true },
-    dns: {
-      servers: [
-        {
-          tag: "dns-direct",
-          address: "8.8.8.8",
-          detour: "direct"
-        }
-      ],
-      strategy: "prefer_ipv4",
-      final: "dns-direct"
-    },
     inbounds: [
       {
-        type: "tun",
-        tag: "tun-in",
-        interface_name: "tun0",
-        address: ["172.19.0.1/30"],
-        mtu: 1500,
-        auto_route: true,
-        strict_route: false,
-        auto_redirect: false,
-        route_address: ["0.0.0.0/1", "128.0.0.0/1"],
-        route_exclude_address: [
-          "172.19.0.0/30",
-          "10.0.0.0/8",
-          "172.16.0.0/12",
-          "192.168.0.0/16"
-        ],
-        stack: "system",
-        sniff: true,
-        sniff_override_destination: true
+        type: "mixed",
+        tag: "mixed-in",
+        listen: "127.0.0.1",
+        listen_port: $port
       }
     ],
     outbounds: [
@@ -81,36 +57,11 @@ jq -n \
           ip_cidr: ["127.0.0.0/8"],
           outbound: "direct"
         },
-        {
-          protocol: "dns",
-          outbound: "direct"
-        },
-        {
-          network: "udp",
-          port: [53],
-          outbound: "direct"
-        },
-        {
-          ip_is_private: true,
-          outbound: "direct"
-        },
         $proxy_direct_rule
       ],
       final: "proxy",
       auto_detect_interface: true
     }
   }' > "$CONFIG_FILE"
-
-for _ in $(seq 1 30); do
-  if [ -c /dev/net/tun ]; then
-    break
-  fi
-  sleep 0.2
-done
-
-if [ ! -c /dev/net/tun ]; then
-  echo "ERROR: /dev/net/tun is not available (container needs --device /dev/net/tun and NET_ADMIN)" >&2
-  exit 1
-fi
 
 exec sing-box run -c "$CONFIG_FILE"

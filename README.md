@@ -57,12 +57,12 @@ docker build -t proxy-google-chrome:latest -f proxy-chrome-docker/dockerfile pro
 
 Use it by setting `CHROME_DOCKER_IMAGE=proxy-google-chrome:latest` in `.env`. Same ports (5900 VNC, 9222 CDP, 8080 noVNC), `VNC_PASS`, and `PROXY_*` contract as the Chromium image. **amd64 only** (Google Chrome .deb).
 
-When `PROXY_HOST` is set, traffic is routed through **sing-box TUN** (not a Chrome extension). The pool API adds `NET_ADMIN` and `/dev/net/tun` to the container automatically.
+When `PROXY_HOST` is set, Chrome uses `--proxy-server` to a local **sing-box mixed inbound** (`127.0.0.1:7890`), which forwards to the HTTP upstream (`PROXY_*` env vars). No TUN / `NET_ADMIN` required.
 
 ### What’s in the image
 
 - **Base**: Ubuntu 22.04; **browser**: `google-chrome-stable` from Google apt repo.
-- **Proxy**: [sing-box](https://github.com/SagerNet/sing-box) TUN inbound → HTTP outbound (`PROXY_*` env vars).
+- **Proxy**: [sing-box](https://github.com/SagerNet/sing-box) mixed inbound on `127.0.0.1:7890` → HTTP outbound (`PROXY_*` env vars).
 - **Process init**: `tini`; **supervisor**: `supervisord` runs Xvfb, Openbox, x11vnc, websockify (with noVNC + self-signed cert), sing-box (when proxied), and Chrome.
 - Includes `PORT=8080` for websockify and `--user-data-dir=/tmp/chrome-user-data` for Chrome in Docker.
 

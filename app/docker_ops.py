@@ -69,10 +69,6 @@ def run_chrome_pool_container(
     if proxy is not None:
         args.extend(
             [
-                "--cap-add",
-                "NET_ADMIN",
-                "--device",
-                "/dev/net/tun",
                 "-e",
                 f"PROXY_HOST={proxy.host}",
                 "-e",

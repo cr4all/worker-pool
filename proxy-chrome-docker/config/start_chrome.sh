@@ -1,5 +1,7 @@
 #!/bin/bash
 
+PROXY_LOCAL_PORT="${PROXY_LOCAL_PORT:-7890}"
+
 CHROME_COMMON=(
   --no-sandbox
   --disable-sync
@@ -14,6 +16,7 @@ CHROME_COMMON=(
   --remote-debugging-port=9223
   --remote-debugging-address=127.0.0.1
   --disable-quic
+  --force-webrtc-ip-handling-policy=disable_non_proxied_udp
 
   # stability for VNC/headful environments
   --disable-features=VizDisplayCompositor
@@ -45,24 +48,27 @@ EOF
   fi
 }
 
-wait_for_tun() {
+wait_for_local_proxy() {
   for _ in $(seq 1 60); do
-    if ip link show tun0 >/dev/null 2>&1; then
+    if (echo >/dev/tcp/127.0.0.1/"$PROXY_LOCAL_PORT") 2>/dev/null; then
       return 0
     fi
     sleep 0.5
   done
-  echo "ERROR: tun0 did not come up; check sing-box logs" >&2
+  echo "ERROR: local proxy did not start on 127.0.0.1:${PROXY_LOCAL_PORT}; check sing-box logs" >&2
   return 1
 }
 
 setup_chrome_profile
 
+CHROME_ARGS=("${CHROME_COMMON[@]}")
+
 if [ -n "${PROXY_HOST:-}" ]; then
-  wait_for_tun
+  wait_for_local_proxy
+  CHROME_ARGS+=(--proxy-server="http://127.0.0.1:${PROXY_LOCAL_PORT}")
 fi
 
-google-chrome-stable "${CHROME_COMMON[@]}" "$START_URL" &
+google-chrome-stable "${CHROME_ARGS[@]}" "$START_URL" &
 
 sleep 2
 
