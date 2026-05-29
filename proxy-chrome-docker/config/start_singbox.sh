@@ -37,7 +37,7 @@ jq -n \
         tag: "tun-in",
         interface_name: "tun0",
         address: ["172.19.0.1/30"],
-        mtu: 9000,
+        mtu: 1200,
         auto_route: true,
         strict_route: true,
         auto_redirect: true,

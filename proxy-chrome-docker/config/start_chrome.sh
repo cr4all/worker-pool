@@ -13,6 +13,7 @@ CHROME_COMMON=(
   --no-default-browser-check
   --remote-debugging-port=9223
   --remote-debugging-address=127.0.0.1
+  --disable-quic
 
   # stability for VNC/headful environments
   --disable-features=VizDisplayCompositor
