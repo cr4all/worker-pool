@@ -27,20 +27,39 @@ proxy_outbound="$(jq -n \
   + (if ($user | length) > 0 then {username: $user} else {} end)
   + (if ($pass | length) > 0 then {password: $pass} else {} end)')"
 
+if [[ "$PROXY_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  proxy_direct_rule="$(jq -n --arg ip "$PROXY_HOST/32" '{ip_cidr: [$ip], outbound: "direct"}')"
+else
+  proxy_direct_rule="$(jq -n --arg host "$PROXY_HOST" '{domain: [$host], outbound: "direct"}')"
+fi
+
 jq -n \
   --argjson proxy "$proxy_outbound" \
+  --argjson proxy_direct_rule "$proxy_direct_rule" \
   '{
-    log: { "level": "debug", "timestamp": true },
+    log: { level: "info", timestamp: true },
+    dns: {
+      servers: [
+        {
+          tag: "local",
+          address: "local",
+          detour: "direct"
+        }
+      ],
+      strategy: "prefer_ipv4"
+    },
     inbounds: [
       {
         type: "tun",
         tag: "tun-in",
         interface_name: "tun0",
         address: ["172.19.0.1/30"],
-        mtu: 1200,
+        mtu: 1500,
         auto_route: true,
-        strict_route: true,
-        auto_redirect: true,
+        strict_route: false,
+        auto_redirect: false,
+        inet4_route_address: ["0.0.0.0/1", "128.0.0.0/1"],
+        inet4_route_exclude_address: ["172.19.0.0/30"],
         stack: "system",
         sniff: true,
         sniff_override_destination: true
@@ -53,9 +72,14 @@ jq -n \
     route: {
       rules: [
         {
-          ip_cidr: ["127.0.0.0/8", "172.19.0.0/30"],
+          ip_cidr: ["127.0.0.0/8"],
           outbound: "direct"
-        }
+        },
+        {
+          ip_is_private: true,
+          outbound: "direct"
+        },
+        $proxy_direct_rule
       ],
       final: "proxy",
       auto_detect_interface: true
