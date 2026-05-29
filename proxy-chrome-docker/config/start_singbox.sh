@@ -41,12 +41,13 @@ jq -n \
     dns: {
       servers: [
         {
-          tag: "local",
-          address: "local",
+          tag: "dns-direct",
+          address: "8.8.8.8",
           detour: "direct"
         }
       ],
-      strategy: "prefer_ipv4"
+      strategy: "prefer_ipv4",
+      final: "dns-direct"
     },
     inbounds: [
       {
@@ -73,6 +74,15 @@ jq -n \
       rules: [
         {
           ip_cidr: ["127.0.0.0/8"],
+          outbound: "direct"
+        },
+        {
+          protocol: "dns",
+          outbound: "direct"
+        },
+        {
+          network: "udp",
+          port: [53],
           outbound: "direct"
         },
         {
