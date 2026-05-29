@@ -43,6 +43,26 @@ Rebuild after changing the Dockerfile, anything under `proxy-chromium-docker/con
 
 At container start, if `PROXY_HOST` is set, the image applies `PROXY_*` to the extension; otherwise Chromium runs **without** the proxy extension. The API passes `PROXY_*` only when `proxies.csv` (see `PROXIES_CSV`) has at least one valid row; if the file is missing or empty, `/start` runs the same image **without** those environment variables.
 
+## Proxy Google Chrome image (Ubuntu, optional)
+
+For **Google Chrome** (not Chromium) on **Ubuntu 22.04**, build from [`proxy-chrome-docker/dockerfile`](proxy-chrome-docker/dockerfile). The existing Alpine + Chromium image above is unchanged.
+
+### Build / rebuild
+
+From the `worker-pool` repo root:
+
+```bash
+docker build -t proxy-google-chrome:latest -f proxy-chrome-docker/dockerfile proxy-chrome-docker
+```
+
+Use it by setting `CHROME_DOCKER_IMAGE=proxy-google-chrome:latest` in `.env`. Same ports (5900 VNC, 9222 CDP, 8080 noVNC), `VNC_PASS`, and `PROXY_*` contract as the Chromium image. **amd64 only** (Google Chrome .deb).
+
+### What’s in the image
+
+- **Base**: Ubuntu 22.04; **browser**: `google-chrome-stable` from Google apt repo.
+- **Process init**: `tini`; **supervisor**: `supervisord` runs Xvfb, Openbox, x11vnc, websockify (with noVNC + self-signed cert), and Chrome.
+- Includes `PORT=8080` for websockify and `--user-data-dir=/tmp/chrome-user-data` for Chrome in Docker.
+
 ## Run
 
 From the `worker-pool` directory (after activating the venv). Listen port is read from **`API_PORT`** in `.env` (default `8080`):

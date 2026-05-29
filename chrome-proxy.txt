@@ -1,0 +1,15 @@
+초기 프로젝트 설치시에 proxy-chromium-docker 또는 proxy-chrome-docker 디렉터리에서 docker build 지령으로 도커 이미지를 만들어야 해.
+
+# Alpine + Chromium (기본)
+docker build -t proxy-chrome:latest -f proxy-chromium-docker/dockerfile proxy-chromium-docker
+
+# Ubuntu 22.04 + Google Chrome
+docker build -t proxy-google-chrome:latest -f proxy-chrome-docker/dockerfile proxy-chrome-docker
+
+
+프로젝트는 프록시리스트를 가지고있어.
+프록시 리스트는 proxies.csv파일안에 있어.
+
+/start요청이 들어오면 프록시리스트에서 랜덤하게 프록시를 선택하돼, 실행되어있는 도커들에서 프록시가 골고루 이용되도록 선택해야 해.
+
+선택된 프록시 정보를 docker 실행시에 PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS라는 환경변수로 넘겨줘야 해.

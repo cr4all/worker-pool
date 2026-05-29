@@ -1,0 +1,67 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:0
+ENV VNC_WIDTH=1920
+ENV VNC_HEIGHT=1080
+ENV VNC_PASS=password
+ENV START_URL=https://www.google.com/
+ENV PORT=8080
+
+RUN apt-get update && apt-get upgrade -y
+
+RUN apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    wget \
+    gnupg \
+    xvfb \
+    x11vnc \
+    openbox \
+    supervisor \
+    tini \
+    bash \
+    socat \
+    websockify \
+    novnc \
+    x11-utils \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    xdg-utils \
+    openssl \
+    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
+    && ln -sf /usr/share/novnc /opt/noVNC \
+    && openssl req -new -x509 -days 3650 -nodes \
+        -out /etc/ssl/novnc.cert \
+        -keyout /etc/ssl/novnc.key \
+        -subj "/CN=localhost" \
+    && rm -rf /var/lib/apt/lists/*
+
+EXPOSE 5900 8080 9222
+
+COPY config /config
+RUN chmod +x /config/*.sh
+
+COPY proxyext /proxyext
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/usr/bin/supervisord", "-c", "/config/supervisord.conf"]
