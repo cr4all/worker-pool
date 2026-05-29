@@ -30,7 +30,7 @@ proxy_outbound="$(jq -n \
 jq -n \
   --argjson proxy "$proxy_outbound" \
   '{
-    log: { level: "warn" },
+    log: { "level": "debug", "timestamp": true },
     inbounds: [
       {
         type: "tun",
