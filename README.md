@@ -7,8 +7,9 @@ API specification (Korean): [docs/API.md](docs/API.md). With the server running,
 ## Requirements
 
 - Python 3.11+
-- Docker CLI on `PATH` with a running daemon (e.g. Docker Desktop)
-- The API process and containers must run on the **same host** so post-`/start` CDP readiness checks against `127.0.0.1:<cdp_port>` are valid.
+- **Linux**: Docker CLI on `PATH` with a running daemon (e.g. Docker Desktop)
+- **Windows Server**: Google Chrome installed; set **`CHROME_EXE_PATH`** in `.env` (native CDP mode — no Docker)
+- The API process and Chrome instances must run on the **same host** so post-`/start` CDP readiness checks against `127.0.0.1:<cdp_port>` are valid.
 
 ## Install
 
@@ -80,13 +81,72 @@ You can still run Uvicorn directly; then set `--port` yourself (it does not read
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
+## Windows Server (native CDP)
+
+On **Windows**, the pool runs **`chrome.exe` directly** — no Docker, VNC, or noVNC. Only **CDP ports** are allocated (`9223`, `9224`, …). Linux deployments continue to use Docker unchanged.
+
+### Setup
+
+1. Install Python 3.11+ and Google Chrome.
+2. Copy `.env.sample` to `.env` and set at minimum:
+
+```env
+API_PORT=8080
+CHROME_EXE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+CHROME_HEADLESS=true
+```
+
+3. Install dependencies and run:
+
+```powershell
+cd worker-pool
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m app.main
+```
+
+4. Chrome binds CDP to `127.0.0.0` is **not** used (many browsers reject it). Instead the pool runs an in-process **TCP relay**:
+
+```text
+0.0.0.0:<cdp_port>  →  127.0.0.1:<cdp_port>   (Python relay, no Administrator required)
+```
+
+5. Allow inbound TCP on CDP ports (**9223+**) in Windows Firewall if remote clients connect via `cdpHost`.
+
+### Windows `/start` response
+
+VNC-related fields are `null`:
+
+```json
+{
+  "name": "chrome-pool-abc123",
+  "vnc_port": null,
+  "cdp_port": 9223,
+  "novnc_port": null,
+  "vnc_password": null,
+  "novnc_url": null,
+  "proxy_index": null,
+  "proxy_region": null
+}
+```
+
+Proxy modes (`AUTO`, `NONE`, `USER`) work the same as Linux; the pool loads the MV3 proxy extension from `proxy-chromium-docker/proxyext/`.
+
+Chrome listens on **`127.0.0.1:<cdp_port>`** for CDP. Remote access uses an in-process **TCP relay** (`0.0.0.0:<cdp_port>` → `127.0.0.1:<cdp_port>`), stopped automatically on `/stop` and `/stopall`.
+
+Instance state is stored in `%LOCALAPPDATA%\chrome-pool\instances.json`. Chrome profiles live under `%TEMP%\chrome-pool\<name>\` (override with `CHROME_USER_DATA_ROOT`).
+
 ## Environment variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `API_PORT` | TCP port for FastAPI when using `python -m app.main` | `8080` |
-| `VNC_PASS` | VNC password | `mystakechrome` |
-| `CHROME_DOCKER_IMAGE` | Image to run | `proxy-chrome:latest` |
+| `VNC_PASS` | VNC password (Docker/Linux only) | `mystakechrome` |
+| `CHROME_DOCKER_IMAGE` | Docker image to run (Linux only) | `proxy-chrome:latest` |
+| `CHROME_EXE_PATH` | Path to `chrome.exe` (**required on Windows**) | (unset) |
+| `CHROME_HEADLESS` | Run Chrome headless on Windows | `true` |
+| `CHROME_USER_DATA_ROOT` | Profile root directory on Windows | `%TEMP%\chrome-pool` |
 | `PROXIES_CSV` | Path to CSV (`Region,Host,Port,User,Pass`). Missing or no valid rows: no `PROXY_*` on `docker run`. | `proxies.csv` |
 | `START_CDP_TIMEOUT_SEC` | Seconds to wait for CDP after start | `60` |
 | `API_KEY` | If set, requires `Authorization: Bearer <key>` | (unset) |
@@ -126,7 +186,34 @@ Authorization: Bearer <API_KEY>
 
 ### `GET /health`
 
-Process liveness and Docker client availability.
+Process liveness and runtime availability check.
+
+**Auth**: not required
+
+- **Linux (Docker)**: checks Docker CLI availability.
+- **Windows (native)**: checks that `CHROME_EXE_PATH` exists; `docker` is always `false`.
+
+```json
+{
+  "ok": true,
+  "docker": true,
+  "docker_error": null,
+  "runtime": "docker"
+}
+```
+
+Windows example:
+
+```json
+{
+  "ok": true,
+  "docker": false,
+  "docker_error": null,
+  "runtime": "native",
+  "chrome_exe": true,
+  "chrome_exe_error": null
+}
+```
 
 ### `POST /start`
 

@@ -52,17 +52,34 @@ Authorization: Bearer <API_KEY>
 
 ## `GET /health`
 
-Docker client availability check.
+Process liveness and runtime availability check.
 
 **Auth**: not required
 
-### 200 response
+- **Linux (Docker)**: checks Docker CLI availability (`docker` field).
+- **Windows (native CDP)**: `runtime` is `"native"`, `docker` is `false`, and `chrome_exe` / `chrome_exe_error` reflect whether `CHROME_EXE_PATH` points to an existing file.
+
+### 200 response (Linux / Docker)
 
 ```json
 {
   "ok": true,
   "docker": true,
-  "docker_error": null
+  "docker_error": null,
+  "runtime": "docker"
+}
+```
+
+### 200 response (Windows / native)
+
+```json
+{
+  "ok": true,
+  "docker": false,
+  "docker_error": null,
+  "runtime": "native",
+  "chrome_exe": true,
+  "chrome_exe_error": null
 }
 ```
 
@@ -70,11 +87,13 @@ Docker client availability check.
 
 ## `POST /start`
 
-Start one Chrome container using the image from `CHROME_DOCKER_IMAGE` (default `proxy-chrome:latest`), label it as pool-managed, and expose:
+Start one Chrome instance.
 
-- container `5900/tcp` → host VNC port
-- container `9222/tcp` → host CDP port
-- container `8080/tcp` (noVNC web UI) → host `novnc_port`
+- **Linux (Docker)**: uses `CHROME_DOCKER_IMAGE`, labels the container as pool-managed, and exposes:
+  - container `5900/tcp` → host VNC port
+  - container `9222/tcp` → host CDP port
+  - container `8080/tcp` (noVNC web UI) → host `novnc_port`
+- **Windows (native)**: runs `CHROME_EXE_PATH` directly; **CDP port only** (`9223`, `9224`, …). Chrome binds CDP to `127.0.0.1`; an in-process **TCP relay** forwards `0.0.0.0:<cdp_port>` → `127.0.0.1:<cdp_port>` for remote access (no Administrator required). `vnc_port`, `novnc_port`, `vnc_password`, and `novnc_url` are **`null`**.
 
 **Auth**: required if `API_KEY` is set
 
@@ -82,7 +101,7 @@ Start one Chrome container using the image from `CHROME_DOCKER_IMAGE` (default `
 
 All fields optional unless `proxy` is `USER`.
 
-- **`vnc_password`** (string, optional): VNC password passed to the container as `VNC_PASS`. If omitted, the server uses env `VNC_PASS` (default `mystakechrome`). Must be non-empty when sent (after trim); max length 128.
+- **`vnc_password`** (string, optional, **Docker/Linux only**): VNC password passed to the container as `VNC_PASS`. If omitted, the server uses env `VNC_PASS` (default `mystakechrome`). Must be non-empty when sent (after trim); max length 128. Ignored on Windows native mode.
 
 ```json
 {}
@@ -129,7 +148,7 @@ Caller-supplied proxy:
 
 `user_proxy.user` and `user_proxy.password` default to empty strings if omitted. `user_proxy.region` is optional.
 
-### 200 response
+### 200 response (Linux / Docker)
 
 ```json
 {
@@ -139,6 +158,21 @@ Caller-supplied proxy:
   "novnc_port": 6080,
   "vnc_password": "mystakechrome",
   "novnc_url": "https://web-6080.example.com/vnc.html?autoconnect=1&password=mystakechrome",
+  "proxy_index": 0,
+  "proxy_region": "UK"
+}
+```
+
+### 200 response (Windows / native CDP)
+
+```json
+{
+  "name": "chrome-pool-abc123def456",
+  "vnc_port": null,
+  "cdp_port": 9223,
+  "novnc_port": null,
+  "vnc_password": null,
+  "novnc_url": null,
   "proxy_index": 0,
   "proxy_region": "UK"
 }
@@ -222,11 +256,11 @@ None.
 
 ## `GET /list`
 
-List running pool-managed containers and their host ports.
+List running pool-managed Chrome instances and their host ports.
 
 **Auth**: required if `API_KEY` is set
 
-### 200 response
+### 200 response (Linux / Docker)
 
 ```json
 {
@@ -236,6 +270,23 @@ List running pool-managed containers and their host ports.
       "vnc_port": 5901,
       "cdp_port": 9223,
       "novnc_port": 6080,
+      "proxy_index": 0,
+      "proxy_region": "UK"
+    }
+  ]
+}
+```
+
+### 200 response (Windows / native CDP)
+
+```json
+{
+  "instances": [
+    {
+      "name": "chrome-pool-a",
+      "vnc_port": null,
+      "cdp_port": 9223,
+      "novnc_port": null,
       "proxy_index": 0,
       "proxy_region": "UK"
     }
@@ -253,8 +304,15 @@ Notes:
 
 ## Port allocation policy
 
-- Slot \(k = 0, 1, 2, ...\)
+**Linux (Docker)** — slot \(k = 0, 1, 2, ...\):
+
 - Host VNC port: `5901 + k` → container `5900/tcp`
 - Host CDP port: `9223 + k` → container `9222/tcp`
 - Host noVNC port: `6080 + k` → container `8080/tcp`
+- Slots already used by the pool, or not bindable on the host, are skipped.
+
+**Windows (native CDP)** — CDP only:
+
+- Chrome CDP listens on `127.0.0.1:<9223 + k>`
+- Host CDP port (returned by API, reachable remotely): `9223 + k` via in-process TCP relay
 - Slots already used by the pool, or not bindable on the host, are skipped.

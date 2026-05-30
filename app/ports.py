@@ -19,6 +19,22 @@ def _can_bind_port(port: int) -> bool:
         return True
 
 
+def allocate_cdp_port(used_ports: set[int]) -> int:
+    """
+    Walk CDP ports upward from CDP_HOST_BASE; skip ports already used by the
+    pool or not bindable on the host.
+    """
+    for k in range(_MAX_SLOT):
+        cdp = CDP_HOST_BASE + k
+        if cdp in used_ports:
+            continue
+        if _can_bind_port(cdp):
+            return cdp
+    raise RuntimeError(
+        f"No free CDP port (tried slots 0..{_MAX_SLOT - 1} from {CDP_HOST_BASE})"
+    )
+
+
 def allocate_sequential_pool_ports(used_ports: set[int]) -> tuple[int, int, int]:
     """
     Walk triples upward from 5901/9223/6080 with the same offset; skip ports
