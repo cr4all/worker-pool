@@ -5,8 +5,10 @@ import os
 import select
 import shutil
 import socket
+import stat
 import subprocess
 import threading
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -26,6 +28,9 @@ _RELAY_LOCK = threading.Lock()
 _RELAYS: dict[str, threading.Event] = {}
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _CDP_CONNECT_HOST = "127.0.0.1"
+_CHROME_KILL_TIMEOUT_SEC = 12.0
+_CHROME_KILL_POLL_SEC = 0.25
+_RMTREE_RETRIES = 10
 
 
 class NativeError(Exception):
@@ -204,7 +209,85 @@ def _kill_pid_tree(pid: int) -> None:
         capture_output=True,
         text=True,
         check=False,
+        creationflags=_CREATE_NO_WINDOW,
     )
+
+
+def _cmdline_user_data_dir(cmdline: list[str]) -> str | None:
+    for i, arg in enumerate(cmdline):
+        lowered = arg.lower()
+        if lowered.startswith("--user-data-dir="):
+            return arg.split("=", 1)[1].strip().strip('"')
+        if lowered == "--user-data-dir" and i + 1 < len(cmdline):
+            return cmdline[i + 1].strip().strip('"')
+    return None
+
+
+def _same_user_data_dir(path_value: str, user_data_dir: Path) -> bool:
+    try:
+        return Path(path_value).resolve() == user_data_dir.resolve()
+    except OSError:
+        return Path(path_value) == user_data_dir
+
+
+def _chrome_processes_for_user_data_dir(user_data_dir: Path) -> list[psutil.Process]:
+    found: list[psutil.Process] = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            name = (proc.info.get("name") or "").lower()
+            if "chrome" not in name:
+                continue
+            cmdline = proc.info.get("cmdline")
+            if not cmdline:
+                continue
+            ud = _cmdline_user_data_dir(cmdline)
+            if ud is None or not _same_user_data_dir(ud, user_data_dir):
+                continue
+            found.append(psutil.Process(proc.info["pid"]))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return found
+
+
+def _kill_processes(procs: list[psutil.Process]) -> None:
+    for pid in sorted({p.pid for p in procs if p.pid > 0}, reverse=True):
+        _kill_pid_tree(pid)
+
+
+def _wait_chrome_exit(user_data_dir: Path, timeout_sec: float) -> None:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        procs = _chrome_processes_for_user_data_dir(user_data_dir)
+        if not procs:
+            return
+        _kill_processes(procs)
+        time.sleep(_CHROME_KILL_POLL_SEC)
+    _kill_processes(_chrome_processes_for_user_data_dir(user_data_dir))
+
+
+def _rmtree_onerror(func, path, _exc_info) -> None:
+    if not os.path.exists(path):
+        return
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
+def _rmtree_force(path: Path) -> None:
+    if not path.exists():
+        return
+    for attempt in range(_RMTREE_RETRIES):
+        try:
+            shutil.rmtree(path, onerror=_rmtree_onerror)
+            if not path.exists():
+                return
+        except OSError:
+            pass
+        time.sleep(0.2 * (attempt + 1))
+    if path.exists():
+        shutil.rmtree(path, onerror=_rmtree_onerror, ignore_errors=True)
 
 
 def _cleanup_stale_entries(data: dict[str, _RegistryEntry]) -> dict[str, _RegistryEntry]:
@@ -398,13 +481,20 @@ def list_pool_instances() -> list[PoolInstance]:
         ]
 
 
-def _remove_instance_user_data_dir(name: str, user_data_root: Path | None = None) -> None:
+def _remove_instance_user_data_dir(
+    name: str,
+    user_data_root: Path | None = None,
+    *,
+    root_pid: int | None = None,
+) -> None:
     user_data_dir = _instance_user_data_dir(
         user_data_root or _default_user_data_root(),
         name,
     )
-    if user_data_dir.is_dir():
-        shutil.rmtree(user_data_dir, ignore_errors=True)
+    if root_pid is not None:
+        _kill_pid_tree(root_pid)
+    _wait_chrome_exit(user_data_dir, _CHROME_KILL_TIMEOUT_SEC)
+    _rmtree_force(user_data_dir)
 
 
 def remove_instance(name: str, user_data_root: Path | None = None) -> None:
@@ -415,9 +505,8 @@ def remove_instance(name: str, user_data_root: Path | None = None) -> None:
             raise NativeError(f"Instance not found: {name}")
         _write_registry(data)
 
-    _kill_pid_tree(entry.pid)
     _stop_cdp_relay(name)
-    _remove_instance_user_data_dir(name, user_data_root)
+    _remove_instance_user_data_dir(name, user_data_root, root_pid=entry.pid)
 
 
 def stop_all_pool_instances(
