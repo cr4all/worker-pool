@@ -411,7 +411,7 @@ async def start_pool(
     except TimeoutError as e:
         try:
             if runtime == "native":
-                native_ops.remove_instance(name)
+                native_ops.remove_instance(name, user_data_root=_chrome_user_data_root(s))
             else:
                 docker_ops.remove_container(name)
         except (DockerError, NativeError):
@@ -436,7 +436,7 @@ async def start_pool(
 
 
 @app.post("/stop", response_model=StopResponse, dependencies=[Depends(require_api_key)])
-def stop_pool(body: StopBody) -> StopResponse:
+def stop_pool(body: StopBody, s: Settings = Depends(get_settings)) -> StopResponse:
     runtime = get_pool_backend()
     n = body.name.strip()
     if not n:
@@ -446,7 +446,7 @@ def stop_pool(body: StopBody) -> StopResponse:
         if not native_ops.instance_exists(n):
             raise HTTPException(status_code=404, detail=f"Instance not found: {n}")
         try:
-            native_ops.remove_instance(n)
+            native_ops.remove_instance(n, user_data_root=_chrome_user_data_root(s))
         except NativeError as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
         return StopResponse(ok=True, name=n)
@@ -467,11 +467,13 @@ def stop_pool(body: StopBody) -> StopResponse:
 
 
 @app.post("/stopall", response_model=StopAllResponse, dependencies=[Depends(require_api_key)])
-def stop_all() -> StopAllResponse:
+def stop_all(s: Settings = Depends(get_settings)) -> StopAllResponse:
     runtime = get_pool_backend()
     try:
         if runtime == "native":
-            stopped, errs = native_ops.stop_all_pool_instances()
+            stopped, errs = native_ops.stop_all_pool_instances(
+                user_data_root=_chrome_user_data_root(s),
+            )
         else:
             stopped, errs = docker_ops.stop_all_pool_containers()
     except DockerError as e:

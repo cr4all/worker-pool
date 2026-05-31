@@ -398,7 +398,16 @@ def list_pool_instances() -> list[PoolInstance]:
         ]
 
 
-def remove_instance(name: str) -> None:
+def _remove_instance_user_data_dir(name: str, user_data_root: Path | None = None) -> None:
+    user_data_dir = _instance_user_data_dir(
+        user_data_root or _default_user_data_root(),
+        name,
+    )
+    if user_data_dir.is_dir():
+        shutil.rmtree(user_data_dir, ignore_errors=True)
+
+
+def remove_instance(name: str, user_data_root: Path | None = None) -> None:
     with _REGISTRY_LOCK:
         data = _cleanup_stale_entries(_read_registry())
         entry = data.pop(name, None)
@@ -408,9 +417,12 @@ def remove_instance(name: str) -> None:
 
     _kill_pid_tree(entry.pid)
     _stop_cdp_relay(name)
+    _remove_instance_user_data_dir(name, user_data_root)
 
 
-def stop_all_pool_instances() -> tuple[list[str], list[tuple[str, str]]]:
+def stop_all_pool_instances(
+    user_data_root: Path | None = None,
+) -> tuple[list[str], list[tuple[str, str]]]:
     with _REGISTRY_LOCK:
         data = _cleanup_stale_entries(_read_registry())
         names = sorted(data.keys())
@@ -419,7 +431,7 @@ def stop_all_pool_instances() -> tuple[list[str], list[tuple[str, str]]]:
     errors: list[tuple[str, str]] = []
     for name in names:
         try:
-            remove_instance(name)
+            remove_instance(name, user_data_root=user_data_root)
             stopped.append(name)
         except NativeError as e:
             errors.append((name, str(e)))
