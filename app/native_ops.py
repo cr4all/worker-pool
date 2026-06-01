@@ -330,6 +330,30 @@ def _instance_user_data_dir(user_data_root: Path, name: str) -> Path:
     return user_data_root / name
 
 
+def resolve_user_data_dir(
+    user_data_root: Path | None,
+    name: str,
+    *,
+    fresh: bool,
+) -> Path:
+    root = user_data_root or _default_user_data_root()
+    user_data_dir = _instance_user_data_dir(root, name)
+    if fresh and user_data_dir.exists():
+        _rmtree_force(user_data_dir)
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+    return user_data_dir
+
+
+def _stop_chrome_for_user_data_dir(
+    user_data_dir: Path,
+    *,
+    root_pid: int | None = None,
+) -> None:
+    if root_pid is not None:
+        _kill_pid_tree(root_pid)
+    _wait_chrome_exit(user_data_dir, _CHROME_KILL_TIMEOUT_SEC)
+
+
 def _chrome_args(
     *,
     cdp_port: int,
@@ -370,6 +394,7 @@ def start_native_instance(
     chrome_exe: str,
     headless: bool,
     user_data_root: Path | None = None,
+    fresh_user_data: bool = False,
     proxy_ext_src: Path | None = None,
     proxy: ProxyRow | None = None,
     proxy_index: int | None = None,
@@ -382,9 +407,11 @@ def start_native_instance(
     if not ok:
         raise NativeError(err or "Invalid CHROME_EXE_PATH")
 
-    root = user_data_root or _default_user_data_root()
-    user_data_dir = _instance_user_data_dir(root, name)
-    user_data_dir.mkdir(parents=True, exist_ok=True)
+    user_data_dir = resolve_user_data_dir(
+        user_data_root,
+        name,
+        fresh=fresh_user_data,
+    )
 
     proxy_ext_dir: Path | None = None
     if proxy is not None:
@@ -481,23 +508,12 @@ def list_pool_instances() -> list[PoolInstance]:
         ]
 
 
-def _remove_instance_user_data_dir(
+def remove_instance(
     name: str,
     user_data_root: Path | None = None,
     *,
-    root_pid: int | None = None,
+    delete_user_data: bool = False,
 ) -> None:
-    user_data_dir = _instance_user_data_dir(
-        user_data_root or _default_user_data_root(),
-        name,
-    )
-    if root_pid is not None:
-        _kill_pid_tree(root_pid)
-    _wait_chrome_exit(user_data_dir, _CHROME_KILL_TIMEOUT_SEC)
-    _rmtree_force(user_data_dir)
-
-
-def remove_instance(name: str, user_data_root: Path | None = None) -> None:
     with _REGISTRY_LOCK:
         data = _cleanup_stale_entries(_read_registry())
         entry = data.pop(name, None)
@@ -505,12 +521,20 @@ def remove_instance(name: str, user_data_root: Path | None = None) -> None:
             raise NativeError(f"Instance not found: {name}")
         _write_registry(data)
 
+    user_data_dir = _instance_user_data_dir(
+        user_data_root or _default_user_data_root(),
+        name,
+    )
     _stop_cdp_relay(name)
-    _remove_instance_user_data_dir(name, user_data_root, root_pid=entry.pid)
+    _stop_chrome_for_user_data_dir(user_data_dir, root_pid=entry.pid)
+    if delete_user_data:
+        _rmtree_force(user_data_dir)
 
 
 def stop_all_pool_instances(
     user_data_root: Path | None = None,
+    *,
+    delete_user_data: bool = False,
 ) -> tuple[list[str], list[tuple[str, str]]]:
     with _REGISTRY_LOCK:
         data = _cleanup_stale_entries(_read_registry())
@@ -520,7 +544,11 @@ def stop_all_pool_instances(
     errors: list[tuple[str, str]] = []
     for name in names:
         try:
-            remove_instance(name, user_data_root=user_data_root)
+            remove_instance(
+                name,
+                user_data_root=user_data_root,
+                delete_user_data=delete_user_data,
+            )
             stopped.append(name)
         except NativeError as e:
             errors.append((name, str(e)))

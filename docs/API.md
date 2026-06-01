@@ -102,9 +102,24 @@ Start one Chrome instance.
 All fields optional unless `proxy` is `USER`.
 
 - **`vnc_password`** (string, optional, **Docker/Linux only**): VNC password passed to the container as `VNC_PASS`. If omitted, the server uses env `VNC_PASS` (default `mystakechrome`). Must be non-empty when sent (after trim); max length 128. Ignored on Windows native mode.
+- **`user_data`** (string enum, optional, **Windows native only**, default `REUSE`): Chrome profile directory under `CHROME_USER_DATA_ROOT` or `%TEMP%\chrome-pool\<name>`.
+  - **`REUSE`**: keep the existing profile directory; create it if missing. **`POST /stop`** does not delete the directory.
+  - **`FRESH`**: delete the profile directory for this `name` (if present), then start with a new empty profile.
 
 ```json
 {}
+```
+
+Reuse an existing Windows profile after `/stop`:
+
+```json
+{ "name": "my-chrome-1", "user_data": "REUSE" }
+```
+
+Start with a clean Windows profile:
+
+```json
+{ "name": "my-chrome-1", "user_data": "FRESH" }
 ```
 
 Name only:

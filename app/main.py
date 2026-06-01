@@ -99,6 +99,13 @@ class ProxyMode(str, Enum):
     USER = "USER"
 
 
+class UserDataMode(str, Enum):
+    """Windows native only: REUSE keeps profile dir across /stop; FRESH wipes it on /start."""
+
+    REUSE = "REUSE"
+    FRESH = "FRESH"
+
+
 class UserProxyIn(BaseModel):
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535)
@@ -128,6 +135,10 @@ class StartBody(BaseModel):
     vnc_password: Optional[str] = Field(default=None, max_length=128)
     proxy: ProxyMode = ProxyMode.AUTO
     user_proxy: Optional[UserProxyIn] = None
+    user_data: UserDataMode = Field(
+        default=UserDataMode.REUSE,
+        description="Windows native: REUSE keeps profile dir across /stop; FRESH wipes on /start.",
+    )
 
     @field_validator("vnc_password")
     @classmethod
@@ -376,6 +387,7 @@ async def start_pool(
                     chrome_exe=chrome_exe,
                     headless=s.chrome_headless,
                     user_data_root=_chrome_user_data_root(s),
+                    fresh_user_data=(body.user_data == UserDataMode.FRESH),
                     proxy=proxy_row,
                     proxy_index=proxy_idx,
                 )
@@ -411,7 +423,11 @@ async def start_pool(
     except TimeoutError as e:
         try:
             if runtime == "native":
-                native_ops.remove_instance(name, user_data_root=_chrome_user_data_root(s))
+                native_ops.remove_instance(
+                    name,
+                    user_data_root=_chrome_user_data_root(s),
+                    delete_user_data=(body.user_data == UserDataMode.FRESH),
+                )
             else:
                 docker_ops.remove_container(name)
         except (DockerError, NativeError):
