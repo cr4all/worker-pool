@@ -49,6 +49,7 @@ def run_chrome_pool_container(
     image: str,
     proxy: ProxyRow | None = None,
     proxy_index: int | None = None,
+    owner: str | None = None,
 ) -> None:
     args = [
         "run",
@@ -66,6 +67,8 @@ def run_chrome_pool_container(
         "--label",
         POOL_LABEL,
     ]
+    if owner:
+        args.extend(["--label", f"chrome-pool.owner={owner}"])
     if proxy is not None:
         args.extend(
             [
@@ -141,6 +144,7 @@ class PoolInstance:
     novnc_port: int | None = None
     proxy_index: int | None = None
     proxy_region: str | None = None
+    owner: str | None = None
 
 
 def _host_port(binding: list[dict[str, str]] | None) -> int | None:
@@ -158,6 +162,13 @@ def _host_port(binding: list[dict[str, str]] | None) -> int | None:
 def _is_managed_pool_container(inspected: dict[str, Any]) -> bool:
     labels = (inspected.get("Config") or {}).get("Labels") or {}
     return labels.get("chrome-pool.managed") == "1"
+
+
+def _owner_from_labels(labels: dict[str, Any]) -> str | None:
+    raw = labels.get("chrome-pool.owner")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
 
 
 def _proxy_meta_from_labels(labels: dict[str, Any]) -> tuple[int | None, str | None]:
@@ -225,7 +236,9 @@ def inspect_instance(name: str) -> PoolInstance | None:
     vnc, cdp, novnc = _extract_ports(c)
     display = _container_display_name(c) or name
     lbl = (c.get("Config") or {}).get("Labels") or {}
-    pi, pr = _proxy_meta_from_labels(lbl if isinstance(lbl, dict) else {})
+    lbl_dict = lbl if isinstance(lbl, dict) else {}
+    pi, pr = _proxy_meta_from_labels(lbl_dict)
+    owner = _owner_from_labels(lbl_dict)
     return PoolInstance(
         name=display,
         vnc_port=vnc,
@@ -233,6 +246,7 @@ def inspect_instance(name: str) -> PoolInstance | None:
         novnc_port=novnc,
         proxy_index=pi,
         proxy_region=pr,
+        owner=owner,
     )
 
 
@@ -278,7 +292,9 @@ def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[
                 continue
             vnc, cdp, novnc = _extract_ports(c)
             lbl = (c.get("Config") or {}).get("Labels") or {}
-            pi, pr = _proxy_meta_from_labels(lbl if isinstance(lbl, dict) else {})
+            lbl_dict = lbl if isinstance(lbl, dict) else {}
+            pi, pr = _proxy_meta_from_labels(lbl_dict)
+            owner = _owner_from_labels(lbl_dict)
             inst = PoolInstance(
                 name=display,
                 vnc_port=vnc,
@@ -286,6 +302,7 @@ def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[
                 novnc_port=novnc,
                 proxy_index=pi,
                 proxy_region=pr,
+                owner=owner,
             )
             if vnc is None or cdp is None or novnc is None:
                 pending[display] = inst
@@ -303,8 +320,12 @@ def list_pool_instances(retries: int = 5, retry_delay_sec: float = 0.2) -> list[
     return [merged[k] for k in sorted(merged.keys())]
 
 
-def stop_all_pool_containers() -> tuple[list[str], list[tuple[str, str]]]:
-    names = list_pool_container_names()
+def stop_all_pool_containers(owner: str | None = None) -> tuple[list[str], list[tuple[str, str]]]:
+    if owner:
+        instances = list_pool_instances()
+        names = [i.name for i in instances if i.owner == owner]
+    else:
+        names = list_pool_container_names()
     stopped: list[str] = []
     errors: list[tuple[str, str]] = []
     for n in names:

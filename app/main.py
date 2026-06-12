@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import sys
 import time
 import uuid
@@ -77,6 +78,19 @@ app = FastAPI(title="Chrome pool manager", version="1.0.0")
 # Serial port allocation + avoid races before docker run / chrome start
 _start_lock = asyncio.Lock()
 
+_OWNER_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
+
+
+def _normalize_owner(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    if not _OWNER_RE.match(s):
+        raise ValueError("owner must be 1–64 chars matching [a-zA-Z0-9_.-]")
+    return s
+
 
 def effective_max_running(s: Settings) -> int:
     """
@@ -132,6 +146,7 @@ class UserProxyIn(BaseModel):
 
 class StartBody(BaseModel):
     name: Optional[str] = None
+    owner: Optional[str] = Field(default=None, max_length=64)
     vnc_password: Optional[str] = Field(default=None, max_length=128)
     proxy: ProxyMode = ProxyMode.AUTO
     user_proxy: Optional[UserProxyIn] = None
@@ -149,6 +164,11 @@ class StartBody(BaseModel):
         if not s:
             raise ValueError("vnc_password must not be empty when provided")
         return s
+
+    @field_validator("owner")
+    @classmethod
+    def owner_valid(cls, v: Optional[str]) -> Optional[str]:
+        return _normalize_owner(v)
 
     @model_validator(mode="after")
     def user_proxy_matches_mode(self) -> Self:
@@ -191,10 +211,20 @@ class InstanceOut(BaseModel):
     novnc_port: Optional[int] = None
     proxy_index: Optional[int] = None
     proxy_region: Optional[str] = None
+    owner: Optional[str] = None
 
 
 class ListResponse(BaseModel):
     instances: list[InstanceOut]
+
+
+class StopAllBody(BaseModel):
+    owner: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("owner")
+    @classmethod
+    def owner_valid(cls, v: Optional[str]) -> Optional[str]:
+        return _normalize_owner(v)
 
 
 class StopAllError(BaseModel):
@@ -390,6 +420,7 @@ async def start_pool(
                     fresh_user_data=(body.user_data == UserDataMode.FRESH),
                     proxy=proxy_row,
                     proxy_index=proxy_idx,
+                    owner=body.owner,
                 )
             except NativeError as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
@@ -414,6 +445,7 @@ async def start_pool(
                     image=s.chrome_docker_image,
                     proxy=proxy_row,
                     proxy_index=proxy_idx,
+                    owner=body.owner,
                 )
             except DockerError as e:
                 raise HTTPException(status_code=500, detail=str(e)) from e
@@ -483,15 +515,16 @@ def stop_pool(body: StopBody, s: Settings = Depends(get_settings)) -> StopRespon
 
 
 @app.post("/stopall", response_model=StopAllResponse, dependencies=[Depends(require_api_key)])
-def stop_all(s: Settings = Depends(get_settings)) -> StopAllResponse:
+def stop_all(body: StopAllBody = StopAllBody(), s: Settings = Depends(get_settings)) -> StopAllResponse:
     runtime = get_pool_backend()
     try:
         if runtime == "native":
             stopped, errs = native_ops.stop_all_pool_instances(
                 user_data_root=_chrome_user_data_root(s),
+                owner=body.owner,
             )
         else:
-            stopped, errs = docker_ops.stop_all_pool_containers()
+            stopped, errs = docker_ops.stop_all_pool_containers(owner=body.owner)
     except DockerError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return StopAllResponse(
@@ -515,6 +548,7 @@ def list_pool() -> ListResponse:
                 novnc_port=i.novnc_port,
                 proxy_index=i.proxy_index,
                 proxy_region=i.proxy_region,
+                owner=i.owner,
             )
             for i in items
         ]

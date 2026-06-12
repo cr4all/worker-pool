@@ -32,6 +32,16 @@ Per-request **`proxy`** on `POST /start` (string enum, default `AUTO`):
 
 Validation: `user_proxy` is **required** when `proxy` is `USER`, and **must be omitted** when `proxy` is `AUTO` or `NONE` → otherwise **422**.
 
+### Owner (multi-mainbot on one pool host)
+
+When several mainbot processes share one worker-pool host, tag instances with **`owner`** so boot cleanup can stop only one mainbot’s Chrome.
+
+- **`POST /start`**: optional body field **`owner`** (string, 1–64 chars, `[a-zA-Z0-9_.-]+`). Stored as Docker label `chrome-pool.owner` or in the Windows native registry.
+- **`POST /stopall`**: optional body `{ "owner": "mainbot-a" }` — stops only instances with that owner. **Omit `owner`** (or send `{}`) to stop **all** pool-managed instances (legacy behaviour).
+- **`GET /list`**: each instance includes optional **`owner`** (`null` if the instance was started without one).
+
+Mainbot sets env **`CHROME_POOL_OWNER`** (unique per process) and passes it on `/start` and boot `/stopall`.
+
 ### Auth (optional)
 
 If `API_KEY` env var is set, all endpoints **except** `GET /health` require:
@@ -101,6 +111,7 @@ Start one Chrome instance.
 
 All fields optional unless `proxy` is `USER`.
 
+- **`owner`** (string, optional): logical owner id for multi-mainbot deployments (see **Owner** above). Max 64 chars; pattern `[a-zA-Z0-9_.-]+`.
 - **`vnc_password`** (string, optional, **Docker/Linux only**): VNC password passed to the container as `VNC_PASS`. If omitted, the server uses env `VNC_PASS` (default `mystakechrome`). Must be non-empty when sent (after trim); max length 128. Ignored on Windows native mode.
 - **`user_data`** (string enum, optional, **Windows native only**, default `REUSE`): Chrome profile directory under `CHROME_USER_DATA_ROOT` or `%TEMP%\chrome-pool\<name>`.
   - **`REUSE`**: keep the existing profile directory; create it if missing. **`POST /stop`** does not delete the directory.
@@ -126,6 +137,12 @@ Name only:
 
 ```json
 { "name": "my-chrome-1" }
+```
+
+Tagged for one mainbot (shared pool host):
+
+```json
+{ "name": "mystake-bot123", "owner": "mainbot-prod-1" }
 ```
 
 Custom VNC password for this instance:
@@ -248,13 +265,26 @@ Remove a **pool-managed** container by name (`docker rm -f`).
 
 ## `POST /stopall`
 
-Remove all running pool-managed containers (label `chrome-pool.managed=1`).
+Remove running pool-managed Chrome instances.
+
+- **No `owner` in body** (or empty `{}`): remove **all** instances (label `chrome-pool.managed=1`).
+- **`owner` set**: remove only instances whose owner tag matches.
 
 **Auth**: required if `API_KEY` is set
 
-### Request body
+### Request body (JSON)
 
-None.
+Stop all (legacy):
+
+```json
+{}
+```
+
+Stop only one mainbot’s instances:
+
+```json
+{ "owner": "mainbot-prod-1" }
+```
 
 ### 200 response
 
@@ -286,7 +316,8 @@ List running pool-managed Chrome instances and their host ports.
       "cdp_port": 9223,
       "novnc_port": 6080,
       "proxy_index": 0,
-      "proxy_region": "UK"
+      "proxy_region": "UK",
+      "owner": "mainbot-prod-1"
     }
   ]
 }
@@ -303,7 +334,8 @@ List running pool-managed Chrome instances and their host ports.
       "cdp_port": 9223,
       "novnc_port": null,
       "proxy_index": 0,
-      "proxy_region": "UK"
+      "proxy_region": "UK",
+      "owner": "mainbot-prod-1"
     }
   ]
 }

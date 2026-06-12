@@ -44,6 +44,7 @@ class _RegistryEntry:
     cdp_port: int
     proxy_index: int | None = None
     proxy_region: str | None = None
+    owner: str | None = None
 
 
 def _default_user_data_root() -> Path:
@@ -89,6 +90,11 @@ def _read_registry() -> dict[str, _RegistryEntry]:
                 proxy_region=(
                     str(entry["proxy_region"])
                     if entry.get("proxy_region") not in (None, "")
+                    else None
+                ),
+                owner=(
+                    str(entry["owner"]).strip()
+                    if entry.get("owner") not in (None, "")
                     else None
                 ),
             )
@@ -398,6 +404,7 @@ def start_native_instance(
     proxy_ext_src: Path | None = None,
     proxy: ProxyRow | None = None,
     proxy_index: int | None = None,
+    owner: str | None = None,
     start_url: str | None = "https://www.google.com/",
 ) -> None:
     if not validate_container_name(name):
@@ -460,6 +467,7 @@ def start_native_instance(
             cdp_port=cdp_port,
             proxy_index=proxy_index,
             proxy_region=(proxy.region if proxy else None),
+            owner=owner,
         )
         _write_registry(data)
 
@@ -489,6 +497,7 @@ def inspect_instance(name: str) -> PoolInstance | None:
             novnc_port=None,
             proxy_index=entry.proxy_index,
             proxy_region=entry.proxy_region,
+            owner=entry.owner,
         )
 
 
@@ -503,6 +512,7 @@ def list_pool_instances() -> list[PoolInstance]:
                 novnc_port=None,
                 proxy_index=entry.proxy_index,
                 proxy_region=entry.proxy_region,
+                owner=entry.owner,
             )
             for name, entry in sorted(data.items())
         ]
@@ -534,11 +544,15 @@ def remove_instance(
 def stop_all_pool_instances(
     user_data_root: Path | None = None,
     *,
+    owner: str | None = None,
     delete_user_data: bool = False,
 ) -> tuple[list[str], list[tuple[str, str]]]:
     with _REGISTRY_LOCK:
         data = _cleanup_stale_entries(_read_registry())
-        names = sorted(data.keys())
+        if owner:
+            names = sorted(n for n, e in data.items() if e.owner == owner)
+        else:
+            names = sorted(data.keys())
 
     stopped: list[str] = []
     errors: list[tuple[str, str]] = []
